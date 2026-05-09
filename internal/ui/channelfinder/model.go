@@ -31,6 +31,12 @@ type Item struct {
 	Type     string // channel, dm, group_dm, private
 	Presence string // for DMs: active, away
 	Joined   bool   // true if the user is already a member; false for browseable public channels
+	// LastVisited is the unix timestamp (seconds) of the user's most
+	// recent visit to this channel; 0 means never visited. Drives the
+	// recency-based sort used by filter(): empty-query order is by
+	// LastVisited DESC, and on a query LastVisited breaks ties within
+	// a match tier.
+	LastVisited int64
 }
 
 // Model is the fuzzy channel finder overlay.
