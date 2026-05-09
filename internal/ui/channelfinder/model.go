@@ -188,7 +188,7 @@ func (m *Model) filter() {
 		// Insertion sort by (LastVisited DESC, typeRank ASC, name ASC).
 		// Insertion sort is stable and the n is small (channel lists).
 		for i := 1; i < len(idxs); i++ {
-			for j := i; j > 0 && m.lessForEmptyQuery(idxs[j], idxs[j-1]); j-- {
+			for j := i; j > 0 && m.lessByRecencyTypeRankName(idxs[j], idxs[j-1]); j-- {
 				idxs[j-1], idxs[j] = idxs[j], idxs[j-1]
 			}
 		}
@@ -327,10 +327,10 @@ func isSeparator(r rune) bool {
 	return false
 }
 
-// lessForEmptyQuery reports whether item a should sort before item b
-// in the empty-query view. Sort key: LastVisited DESC, typeRank ASC,
-// Name ASC (case-insensitive).
-func (m *Model) lessForEmptyQuery(ai, bi int) bool {
+// lessByRecencyTypeRankName reports whether item a should sort before item b
+// using the sort key: LastVisited DESC, typeRank ASC, Name ASC
+// (case-insensitive).
+func (m *Model) lessByRecencyTypeRankName(ai, bi int) bool {
 	a, b := m.items[ai], m.items[bi]
 	if a.LastVisited != b.LastVisited {
 		return a.LastVisited > b.LastVisited
