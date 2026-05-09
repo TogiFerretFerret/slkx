@@ -584,6 +584,13 @@ type JoinChannelFunc func(channelID, channelName string) tea.Msg
 // the WorkspaceContext). Always called regardless of FromHistory.
 type ChannelVisitRecorder func(channelID string)
 
+// ChannelLookupFunc returns metadata for a channel that the App has
+// in its navigation history. Used by navigateBack / navigateForward
+// to skip stale entries (channels the user has left, archived, or
+// kicked from). Returns ok=false when the channel is no longer
+// available in the active workspace.
+type ChannelLookupFunc func(channelID string) (name, channelType string, ok bool)
+
 // ChannelJoinedMsg is sent after the user successfully joins a channel from
 // the channel finder. The App responds by adding the channel to the sidebar
 // (so it appears in the user's regular channel list), marking it as joined in
@@ -732,6 +739,8 @@ type App struct {
 
 	// Channel visit recording (persists SQLite + WorkspaceContext map)
 	channelVisitRecorder ChannelVisitRecorder
+
+	channelLookup ChannelLookupFunc
 
 	// Workspace switching
 	workspaceSwitcher SwitchWorkspaceFunc
@@ -3865,6 +3874,14 @@ func (a *App) SetChannelLastReadFetcher(fn func(channelID string) string) {
 // ChannelSelectedMsg.
 func (a *App) SetChannelVisitRecorder(fn ChannelVisitRecorder) {
 	a.channelVisitRecorder = fn
+}
+
+// SetChannelLookupFunc wires the callback used by navigateBack /
+// navigateForward to validate channel IDs from the history stack
+// before re-opening them. Stale IDs (return ok=false) are silently
+// dropped and skipped.
+func (a *App) SetChannelLookupFunc(fn ChannelLookupFunc) {
+	a.channelLookup = fn
 }
 
 // SetThreadReplySender sets the callback used to send thread replies.

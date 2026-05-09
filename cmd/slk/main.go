@@ -630,6 +630,24 @@ func run() error {
 			}()
 		})
 
+		app.SetChannelLookupFunc(func(channelID string) (string, string, bool) {
+			// Sidebar (joined channels + Slack-native sections).
+			for _, ch := range wctx.Channels {
+				if ch.ID == channelID {
+					return ch.Name, ch.Type, true
+				}
+			}
+			// Finder items (joined + browseable). Covers DMs/group DMs
+			// that aren't in the sidebar pre-conversation, and any
+			// browseable public channels.
+			for _, it := range wctx.FinderItems {
+				if it.ID == channelID {
+					return it.Name, it.Type, true
+				}
+			}
+			return "", "", false
+		})
+
 		app.SetChannelCacheReader(func(channelID string) []messages.MessageItem {
 			return loadCachedMessages(db, client.UserID(), channelID, userNames, tsFormat)
 		})
