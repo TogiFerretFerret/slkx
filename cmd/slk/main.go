@@ -1492,6 +1492,29 @@ func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, 
 	return msgItems
 }
 
+// summarizeMessages collapses a slice of messages.MessageItem into a
+// compact "count=N oldest=<ts> newest=<ts>" string for [cache] log
+// lines. Empty/nil slices return "count=0" with no ts fields. Assumes
+// the slice is sorted ascending by TS (the convention everywhere in
+// slk's cache and fetch paths).
+func summarizeMessages(items []messages.MessageItem) string {
+	if len(items) == 0 {
+		return "count=0"
+	}
+	return fmt.Sprintf("count=%d oldest=%s newest=%s",
+		len(items), items[0].TS, items[len(items)-1].TS)
+}
+
+// summarizeCachedRows is summarizeMessages's twin for raw cache.Message
+// rows (used by loadCachedMessages / loadCachedThreadReplies).
+func summarizeCachedRows(rows []cache.Message) string {
+	if len(rows) == 0 {
+		return "count=0"
+	}
+	return fmt.Sprintf("count=%d oldest=%s newest=%s",
+		len(rows), rows[0].TS, rows[len(rows)-1].TS)
+}
+
 // loadCachedMessages reads up to 50 cached messages for a channel from
 // SQLite and reconstructs []messages.MessageItem with the same fidelity
 // as fetchChannelMessages — including reactions and (when raw_json is
