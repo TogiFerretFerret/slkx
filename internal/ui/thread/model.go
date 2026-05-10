@@ -423,6 +423,49 @@ func (m *Model) SetUserNames(names map[string]string) {
 	m.InvalidateCache()
 }
 
+// PatchUserName updates the in-memory userNames map (used for @mention
+// rendering) and overwrites the UserName field on the parent message
+// and every cached reply authored by userID. Always invalidates the
+// render cache after a map change so mentions of <@userID> in other
+// authors' text re-resolve. Idempotent: no-op when the name is
+// unchanged.
+//
+// Mirrors messages.Model.PatchUserName. Used by the async user-
+// resolution path: history fetchers stash MessageItem.UserName =
+// m.UserID for unknown authors. When the resolution returns
+// asynchronously, the App calls PatchUserName to replace the
+// placeholders live without re-fetching the thread.
+func (m *Model) PatchUserName(userID, displayName string) {
+	if userID == "" {
+		return
+	}
+	if m.userNames == nil {
+		m.userNames = map[string]string{}
+	}
+	if m.userNames[userID] == displayName {
+		return
+	}
+	m.userNames[userID] = displayName
+	// The render cache stores rows with their mentions already resolved
+	// (RenderSlackMarkdown consults userNames at render time), so any
+	// cached row that mentioned <@userID> is now stale. Mirror
+	// SetUserNames's behavior: invalidate unconditionally on map change.
+	// Bump userNamesV so chromeCache (which renders the parent message
+	// and consults userNames for its mentions) also rebuilds.
+	m.userNamesV++
+	m.cache = nil
+	m.viewCacheValid = false
+	if m.parent.UserID == userID && m.parent.UserName != displayName {
+		m.parent.UserName = displayName
+	}
+	for i := range m.replies {
+		if m.replies[i].UserID == userID && m.replies[i].UserName != displayName {
+			m.replies[i].UserName = displayName
+		}
+	}
+	m.dirty()
+}
+
 // SetChannelNames sets the channel ID -> name map used to resolve bare
 // <#CHANNELID> mentions in thread replies. Bumps channelNamesV
 // unconditionally; see SetUserNames for the rationale.

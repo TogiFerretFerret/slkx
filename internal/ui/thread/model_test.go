@@ -450,3 +450,77 @@ func TestHasReply(t *testing.T) {
 		t.Error("expected HasReply(1.999) false; not in thread")
 	}
 }
+
+func TestThreadPatchUserName_UpdatesMatchingRowsAndUserNamesMap(t *testing.T) {
+	m := New()
+	parent := messages.MessageItem{TS: "1.0", UserID: "U1", UserName: "U1", Text: "parent"}
+	replies := []messages.MessageItem{
+		{TS: "1.001", UserID: "U1", UserName: "U1", Text: "first reply"},
+		{TS: "1.002", UserID: "U2", UserName: "alice", Text: "other reply"},
+		{TS: "1.003", UserID: "U1", UserName: "U1", Text: "third reply"},
+	}
+	m.SetThread(parent, replies, "C1", "1.0")
+
+	verBefore := m.Version()
+
+	m.PatchUserName("U1", "bob")
+
+	if m.replies[0].UserName != "bob" {
+		t.Errorf("replies[0].UserName = %q, want bob", m.replies[0].UserName)
+	}
+	if m.replies[1].UserName != "alice" {
+		t.Errorf("replies[1].UserName should not have changed; got %q", m.replies[1].UserName)
+	}
+	if m.replies[2].UserName != "bob" {
+		t.Errorf("replies[2].UserName = %q, want bob", m.replies[2].UserName)
+	}
+	if got := m.userNames["U1"]; got != "bob" {
+		t.Errorf("userNames[U1] = %q, want bob", got)
+	}
+	if m.Version() <= verBefore {
+		t.Error("Version should bump after PatchUserName")
+	}
+}
+
+func TestThreadPatchUserName_NoOpWhenUnchanged(t *testing.T) {
+	m := New()
+	parent := messages.MessageItem{TS: "1.0", UserID: "U2", UserName: "alice", Text: "p"}
+	replies := []messages.MessageItem{
+		{TS: "1.001", UserID: "U1", UserName: "U1", Text: "hi"},
+	}
+	m.SetThread(parent, replies, "C1", "1.0")
+
+	m.PatchUserName("U1", "bob") // prime the userNames map
+	verBefore := m.Version()
+
+	m.PatchUserName("U1", "bob") // second call, identical
+
+	if m.Version() != verBefore {
+		t.Error("Version should NOT bump on no-op PatchUserName")
+	}
+}
+
+func TestThreadPatchUserName_InvalidatesCacheEvenWithNoMatchingRows(t *testing.T) {
+	// Renders happen with userNames consulted at render time; mention
+	// text in other-authored replies goes stale when userNames
+	// changes. PatchUserName must invalidate the cache even if no
+	// reply's UserID == userID.
+	m := New()
+	parent := messages.MessageItem{TS: "1.0", UserID: "alice", UserName: "alice", Text: "p"}
+	replies := []messages.MessageItem{
+		{TS: "1.001", UserID: "alice", UserName: "alice", Text: "hello <@U99>"},
+	}
+	m.SetThread(parent, replies, "C1", "1.0")
+
+	// Prime the render cache by calling View.
+	_ = m.View(20, 80)
+	if m.cache == nil {
+		t.Fatal("expected cache populated after View(); harness assumption failed")
+	}
+
+	m.PatchUserName("U99", "carol")
+
+	if m.cache != nil {
+		t.Error("PatchUserName should have invalidated m.cache so the mention re-resolves")
+	}
+}
