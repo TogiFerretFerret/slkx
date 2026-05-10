@@ -1427,14 +1427,20 @@ func resolveUser(client *slackclient.Client, userID string, userNames map[string
 
 func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, db *cache.DB, userNames map[string]string, tsFormat string, avatarCache *avatar.Cache) []messages.MessageItem {
 	ctx := context.Background()
+	debuglog.Cache("fetchOlderMessages: channel=%s latest_ts=%s entry", channelID, latestTS)
+	start := time.Now()
 	history, err := client.GetOlderHistory(ctx, channelID, 50, latestTS)
 	if err != nil {
+		debuglog.Cache("fetchOlderMessages: GetOlderHistory %s: %v dur_ms=%d (returning nil → keep cache)",
+			channelID, err, time.Since(start).Milliseconds())
 		return nil
 	}
 
 	var msgItems []messages.MessageItem
 	for _, m := range history {
 		rawBytes, _ := json.Marshal(m)
+		debuglog.Cache("fetchOlderMessages: upsert channel=%s ts=%s subtype=%q reply_count=%d files=%d",
+			channelID, m.Timestamp, m.SubType, m.ReplyCount, len(m.Files))
 		db.UpsertMessage(cache.Message{
 			TS:          m.Timestamp,
 			ChannelID:   channelID,
@@ -1489,6 +1495,8 @@ func fetchOlderMessages(client *slackclient.Client, channelID, latestTS string, 
 		msgItems[i], msgItems[j] = msgItems[j], msgItems[i]
 	}
 
+	debuglog.Cache("fetchOlderMessages: channel=%s latest_ts=%s result %s dur_ms=%d (older history backfill)",
+		channelID, latestTS, summarizeMessages(msgItems), time.Since(start).Milliseconds())
 	return msgItems
 }
 
