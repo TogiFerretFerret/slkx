@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gammons/slk/internal/debuglog"
+
 	"golang.org/x/image/draw"
 	"golang.org/x/sync/singleflight"
 )
