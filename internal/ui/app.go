@@ -1557,7 +1557,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if msg.ChannelID == a.activeChannelID {
-			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_active_channel",
+			// "active_channel_no_unread_bump": message arrived for the
+			// currently-viewed channel, so it's appended to the message
+			// pane (not skipped) but no unread bump is applied — the
+			// user is actively reading.
+			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=active_channel_no_unread_bump",
 				msg.ChannelID, msg.Message.TS)
 			// Route thread replies to the thread panel if it matches the open thread
 			if a.threadVisible && msg.Message.ThreadTS == a.threadPanel.ThreadTS() {
