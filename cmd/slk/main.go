@@ -1720,15 +1720,20 @@ func loadCachedThreadReplies(
 // cache view. Do NOT change nil to mean "empty channel".
 func fetchChannelMessages(client *slackclient.Client, channelID string, db *cache.DB, userNames map[string]string, tsFormat string, avatarCache *avatar.Cache) []messages.MessageItem {
 	ctx := context.Background()
+	debuglog.Cache("fetchChannelMessages: channel=%s entry", channelID)
+	start := time.Now()
 	history, err := client.GetHistory(ctx, channelID, 50, "")
 	if err != nil {
-		debuglog.Cache("fetchChannelMessages: GetHistory %s: %v", channelID, err)
+		debuglog.Cache("fetchChannelMessages: GetHistory %s: %v dur_ms=%d (returning nil → keep cache)",
+			channelID, err, time.Since(start).Milliseconds())
 		return nil
 	}
 
 	msgItems := make([]messages.MessageItem, 0, len(history))
 	for _, m := range history {
 		rawBytes, _ := json.Marshal(m)
+		debuglog.Cache("fetchChannelMessages: upsert channel=%s ts=%s subtype=%q reply_count=%d files=%d",
+			channelID, m.Timestamp, m.SubType, m.ReplyCount, len(m.Files))
 		db.UpsertMessage(cache.Message{
 			TS:          m.Timestamp,
 			ChannelID:   channelID,
@@ -1783,6 +1788,8 @@ func fetchChannelMessages(client *slackclient.Client, channelID string, db *cach
 		msgItems[i], msgItems[j] = msgItems[j], msgItems[i]
 	}
 
+	debuglog.Cache("fetchChannelMessages: channel=%s result %s dur_ms=%d (authoritative replace)",
+		channelID, summarizeMessages(msgItems), time.Since(start).Milliseconds())
 	return msgItems
 }
 
@@ -1793,15 +1800,20 @@ func fetchChannelMessages(client *slackclient.Client, channelID string, db *cach
 // an already-rendered cached view.
 func fetchThreadReplies(client *slackclient.Client, channelID, threadTS string, db *cache.DB, userNames map[string]string, tsFormat string, avatarCache *avatar.Cache) []messages.MessageItem {
 	ctx := context.Background()
+	debuglog.Cache("fetchThreadReplies: channel=%s thread_ts=%s entry", channelID, threadTS)
+	start := time.Now()
 	history, err := client.GetReplies(ctx, channelID, threadTS)
 	if err != nil {
-		debuglog.Cache("fetchThreadReplies: GetReplies %s/%s: %v", channelID, threadTS, err)
+		debuglog.Cache("fetchThreadReplies: GetReplies %s/%s: %v dur_ms=%d (returning nil → keep cache)",
+			channelID, threadTS, err, time.Since(start).Milliseconds())
 		return nil
 	}
 
 	msgItems := make([]messages.MessageItem, 0, len(history))
 	for _, m := range history {
 		rawBytes, _ := json.Marshal(m)
+		debuglog.Cache("fetchThreadReplies: upsert channel=%s ts=%s subtype=%q reply_count=%d files=%d",
+			channelID, m.Timestamp, m.SubType, m.ReplyCount, len(m.Files))
 		db.UpsertMessage(cache.Message{
 			TS:          m.Timestamp,
 			ChannelID:   channelID,
@@ -1854,10 +1866,15 @@ func fetchThreadReplies(client *slackclient.Client, channelID, threadTS string, 
 	// First message from GetConversationReplies is the parent -- skip it for the replies list.
 	// Return non-nil empty on success-no-replies so the consumer can distinguish from the
 	// error path (which returns nil above).
+	var out []messages.MessageItem
 	if len(msgItems) > 1 {
-		return msgItems[1:]
+		out = msgItems[1:]
+	} else {
+		out = []messages.MessageItem{}
 	}
-	return []messages.MessageItem{}
+	debuglog.Cache("fetchThreadReplies: channel=%s thread_ts=%s result %s dur_ms=%d (authoritative replace)",
+		channelID, threadTS, summarizeMessages(out), time.Since(start).Milliseconds())
+	return out
 }
 
 func formatTimestamp(ts, format string) string {
