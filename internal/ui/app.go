@@ -1414,6 +1414,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case imgrender.ImageReadyMsg:
+		debuglog.ImgFetch("recv: kind=ready channel=%s ts=%s key=%s req_id=%d",
+			msg.Channel, msg.TS, msg.Key, msg.ReqID)
 		// Image attachment finished downloading; invalidate the
 		// messages pane's render cache for the affected channel so the
 		// next View() picks up the cached bytes inline. Only the
@@ -1432,6 +1434,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case imgrender.ImageFailedMsg:
+		debuglog.ImgFetch("recv: kind=failed key=%s req_id=%d", msg.Key, msg.ReqID)
 		// Image attachment fetch hit a permanent failure (all auths
 		// exhausted, or some other terminal error). Clear the in-flight
 		// bit so a future cache invalidation doesn't keep retrying;

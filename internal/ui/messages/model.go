@@ -338,9 +338,13 @@ func (m *Model) SetFocused(focused bool) {
 // entry to mark stale.
 func (m *Model) HandleImageReady(channel, ts, key string) {
 	if channel != m.channelName {
+		debuglog.ImgFetch("messages.HandleImageReady: channel=%q active_channel=%q key=%s SKIP (not active)",
+			channel, m.channelName, key)
 		return
 	}
 	if key == "" {
+		debuglog.ImgFetch("messages.HandleImageReady: channel=%q ts=%s key=<empty> legacy_path",
+			channel, ts)
 		// Legacy path: no per-key bookkeeping available, so we fall
 		// back to the wholesale invalidation that the new fast path
 		// is meant to avoid. Used by tests that drive transitions
@@ -353,7 +357,9 @@ func (m *Model) HandleImageReady(channel, ts, key string) {
 		return
 	}
 	if m.imgRenderer != nil {
-		m.imgRenderer.ClearFetching(key)
+		cleared := m.imgRenderer.ClearFetching(key)
+		debuglog.ImgFetch("messages.HandleImageReady: channel=%q key=%s cleared=%v",
+			channel, key, cleared)
 	}
 	if ts != "" && m.cache != nil {
 		if m.staleEntries == nil {
@@ -386,7 +392,9 @@ func (m *Model) HandleImageFailed(key string) {
 	if m.imgRenderer == nil {
 		m.imgRenderer = imgrender.NewRenderer()
 	}
-	m.imgRenderer.MarkFailed(key)
+	tracked := m.imgRenderer.MarkFailed(key)
+	debuglog.ImgFetch("messages.HandleImageFailed: channel=%q key=%s was_in_flight=%v",
+		m.channelName, key, tracked)
 }
 
 // Version returns a counter that increments every time the View() output
