@@ -554,6 +554,11 @@ func run() error {
 	workspaces := make(map[string]*WorkspaceContext)
 	var activeTeamID string
 
+	// router holds the program-wide active workspace pointer. All
+	// wireCallbacks-registered callbacks read router.Active() at
+	// invocation time so they always see the current workspace.
+	router := newWorkspaceRouter()
+
 	// Wire theme switcher: dispatch to the appropriate saver based on scope.
 	app.SetThemeSaver(func(name string, scope themeswitcher.ThemeScope) {
 		switch scope {
@@ -637,27 +642,43 @@ func run() error {
 		}()
 	})
 
-	// wireCallbacks sets all App callbacks to use the given workspace context.
-	// Called on initial setup and again when the user switches workspaces.
-	wireCallbacks := func(wctx *WorkspaceContext) {
-		client := wctx.Client
-		userNames := wctx.UserNames
-		lastReadMap := wctx.LastReadMap
-
+	// wireCallbacks installs all App callbacks once at startup. Each
+	// callback reads router.Active() at invocation time, so the
+	// effective workspace tracks the user's current Ctrl-N selection
+	// without any per-switch closure rebinding.
+	//
+	// Goroutines launched from inside a callback must capture
+	// workspace-scoped values (Client, LastReadMap, ...) into local
+	// vars BEFORE the `go func()` so they are not affected by a
+	// concurrent router.Set during the goroutine's lifetime.
+	wireCallbacks := func(router *workspaceRouter) {
 		app.SetChannelLastReadFetcher(func(channelID string) string {
-			return lastReadMap[channelID]
+			wctx := router.Active()
+			if wctx == nil {
+				return ""
+			}
+			return wctx.LastReadMap[channelID]
 		})
 
 		app.SetChannelVisitRecorder(func(channelID string) {
+			wctx := router.Active()
+			if wctx == nil {
+				return
+			}
 			wctx.LastVisitedByChannel[channelID] = time.Now().Unix()
+			teamID := wctx.TeamID
 			go func() {
-				if err := db.RecordChannelVisit(wctx.TeamID, channelID); err != nil {
-					log.Printf("warning: recording channel visit %s/%s: %v", wctx.TeamID, channelID, err)
+				if err := db.RecordChannelVisit(teamID, channelID); err != nil {
+					log.Printf("warning: recording channel visit %s/%s: %v", teamID, channelID, err)
 				}
 			}()
 		})
 
 		app.SetChannelLookupFunc(func(channelID string) (string, string, bool) {
+			wctx := router.Active()
+			if wctx == nil {
+				return "", "", false
+			}
 			// Sidebar (joined channels + Slack-native sections).
 			for _, ch := range wctx.Channels {
 				if ch.ID == channelID {
@@ -676,17 +697,28 @@ func run() error {
 		})
 
 		app.SetChannelCacheReader(func(channelID string) []messages.MessageItem {
-			return loadCachedMessages(db, client.UserID(), channelID, userNames, tsFormat)
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			return loadCachedMessages(db, wctx.Client.UserID(), channelID, wctx.UserNames, tsFormat)
 		})
 
 		app.SetChannelFetcher(func(channelID, channelName string) tea.Msg {
-			msgItems := fetchChannelMessages(client, channelID, db, userNames, tsFormat, avatarCache)
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			msgItems := fetchChannelMessages(wctx.Client, channelID, db, wctx.UserNames, tsFormat, avatarCache)
 
-			lastReadTS := lastReadMap[channelID]
+			lastReadTS := wctx.LastReadMap[channelID]
 
 			// Mark channel as read up to the latest message
 			if len(msgItems) > 0 {
 				latestTS := msgItems[len(msgItems)-1].TS
+				// Capture before goroutine to avoid racing with router.Set.
+				client := wctx.Client
+				lastReadMap := wctx.LastReadMap
 				go func() {
 					_ = client.MarkChannel(ctx, channelID, latestTS)
 					_ = db.UpdateLastReadTS(channelID, latestTS)
@@ -705,6 +737,12 @@ func run() error {
 		})
 
 		app.SetMessageSender(func(channelID, text string) tea.Msg {
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			client := wctx.Client
+			userNames := wctx.UserNames
 			ctx := context.Background()
 			ts, sentMrkdwn, err := client.SendMessage(ctx, channelID, text)
 			if err != nil {
@@ -728,6 +766,10 @@ func run() error {
 		})
 
 		app.SetMessageEditor(func(channelID, ts, text string) tea.Msg {
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			// EditMessage returns the converted mrkdwn but we ignore
@@ -735,7 +777,7 @@ func run() error {
 			// copy with the server-stored text via UpdateMessageInPlace
 			// (internal/ui/app.go:1382). MessageEditedMsg only carries
 			// success/fail status.
-			_, err := client.EditMessage(ctx, channelID, ts, text)
+			_, err := wctx.Client.EditMessage(ctx, channelID, ts, text)
 			if err != nil {
 				log.Printf("Warning: failed to edit message %s/%s: %v", channelID, ts, err)
 			}
@@ -743,9 +785,13 @@ func run() error {
 		})
 
 		app.SetMessageDeleter(func(channelID, ts string) tea.Msg {
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			err := client.RemoveMessage(ctx, channelID, ts)
+			err := wctx.Client.RemoveMessage(ctx, channelID, ts)
 			if err != nil {
 				log.Printf("Warning: failed to delete message %s/%s: %v", channelID, ts, err)
 			}
@@ -753,6 +799,12 @@ func run() error {
 		})
 
 		app.SetMessageMarkUnreader(func(channelID, threadTS, boundaryTS string, unreadCount int) tea.Msg {
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			client := wctx.Client
+			lastReadMap := wctx.LastReadMap
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
@@ -789,6 +841,11 @@ func run() error {
 
 		app.SetUploader(func(channelID, threadTS, caption string, attachments []compose.PendingAttachment) tea.Cmd {
 			return func() tea.Msg {
+				wctx := router.Active()
+				if wctx == nil {
+					return nil
+				}
+				client := wctx.Client
 				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 				defer cancel()
 
@@ -822,7 +879,11 @@ func run() error {
 		})
 
 		app.SetOlderMessagesFetcher(func(channelID, oldestTS string) tea.Msg {
-			msgItems := fetchOlderMessages(client, channelID, oldestTS, db, userNames, tsFormat, avatarCache)
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			msgItems := fetchOlderMessages(wctx.Client, channelID, oldestTS, db, wctx.UserNames, tsFormat, avatarCache)
 			return ui.OlderMessagesLoadedMsg{
 				ChannelID: channelID,
 				Messages:  msgItems,
@@ -830,7 +891,11 @@ func run() error {
 		})
 
 		app.SetThreadFetcher(func(channelID, threadTS string) tea.Msg {
-			replies := fetchThreadReplies(client, channelID, threadTS, db, userNames, tsFormat, avatarCache)
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			replies := fetchThreadReplies(wctx.Client, channelID, threadTS, db, wctx.UserNames, tsFormat, avatarCache)
 			return ui.ThreadRepliesLoadedMsg{
 				ThreadTS: threadTS,
 				Replies:  replies,
@@ -838,10 +903,19 @@ func run() error {
 		})
 
 		app.SetThreadCacheReader(func(channelID, threadTS string) []messages.MessageItem {
-			return loadCachedThreadReplies(db, client.UserID(), channelID, threadTS, userNames, tsFormat)
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			return loadCachedThreadReplies(db, wctx.Client.UserID(), channelID, threadTS, wctx.UserNames, tsFormat)
 		})
 
 		app.SetThreadMarker(func(channelID, threadTS, ts string) {
+			wctx := router.Active()
+			if wctx == nil {
+				return
+			}
+			client := wctx.Client
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
@@ -852,7 +926,11 @@ func run() error {
 		})
 
 		app.SetThreadsListFetcher(func(teamID string) tea.Msg {
-			summaries, err := db.ListInvolvedThreads(teamID, client.UserID())
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			summaries, err := db.ListInvolvedThreads(teamID, wctx.Client.UserID())
 			if err != nil {
 				log.Printf("Warning: ListInvolvedThreads(%s): %v", teamID, err)
 				return ui.ThreadsListLoadedMsg{TeamID: teamID, Summaries: nil}
@@ -875,6 +953,12 @@ func run() error {
 		})
 
 		app.SetThreadReplySender(func(channelID, threadTS, text string) tea.Msg {
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			client := wctx.Client
+			userNames := wctx.UserNames
 			ctx := context.Background()
 			ts, sentMrkdwn, err := client.SendReply(ctx, channelID, threadTS, text)
 			if err != nil {
@@ -901,44 +985,64 @@ func run() error {
 
 		app.SetReactionSender(
 			func(channelID, messageTS, emojiName string) error {
-				return client.AddReaction(ctx, channelID, messageTS, emojiName)
+				wctx := router.Active()
+				if wctx == nil {
+					return nil
+				}
+				return wctx.Client.AddReaction(ctx, channelID, messageTS, emojiName)
 			},
 			func(channelID, messageTS, emojiName string) error {
-				return client.RemoveReaction(ctx, channelID, messageTS, emojiName)
+				wctx := router.Active()
+				if wctx == nil {
+					return nil
+				}
+				return wctx.Client.RemoveReaction(ctx, channelID, messageTS, emojiName)
 			},
 		)
 
 		app.SetPermalinkFetcher(func(ctx context.Context, channelID, ts string) (string, error) {
-			return client.GetPermalink(ctx, channelID, ts)
+			wctx := router.Active()
+			if wctx == nil {
+				return "", nil
+			}
+			return wctx.Client.GetPermalink(ctx, channelID, ts)
 		})
 
-		app.SetCurrentUserID(client.UserID())
-
 		app.SetTypingSender(func(channelID string) {
-			_ = client.SendTyping(channelID)
+			wctx := router.Active()
+			if wctx == nil {
+				return
+			}
+			_ = wctx.Client.SendTyping(channelID)
 		})
 
 		app.SetChannelJoiner(func(channelID, channelName string) tea.Msg {
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
 			ctx := context.Background()
-			if err := client.JoinChannel(ctx, channelID); err != nil {
+			if err := wctx.Client.JoinChannel(ctx, channelID); err != nil {
 				return ui.ChannelJoinFailedMsg{ID: channelID, Name: channelName, Err: err}
 			}
 			return ui.ChannelJoinedMsg{ID: channelID, Name: channelName}
 		})
 	}
 
+	// Bind all callbacks once. They read router.Active() at invocation.
+	wireCallbacks(router)
+
 	// Wire workspace switcher
 	app.SetWorkspaceSwitcher(func(teamID string) tea.Msg {
-		wctx, ok := workspaces[teamID]
-		if !ok {
+		wctx := router.ByID(teamID)
+		if wctx == nil {
 			return nil
 		}
 
-		// Update active pointer
+		// Update active pointer; callbacks read router.Active() at
+		// invocation time, so no closure rebinding is needed.
 		activeTeamID = teamID
-
-		// Re-wire all callbacks to the new workspace's client
-		wireCallbacks(wctx)
+		router.Set(wctx)
 
 		return ui.WorkspaceSwitchedMsg{
 			TeamID:           wctx.TeamID,
@@ -996,6 +1100,7 @@ func run() error {
 			}
 
 			workspaces[wctx.TeamID] = wctx
+			router.all[wctx.TeamID] = wctx
 			wsMgr.AddWorkspace(wctx.TeamID, wctx.TeamName, "")
 
 			// Decide whether this workspace becomes the active one.
@@ -1010,7 +1115,7 @@ func run() error {
 			}
 			if claimActive {
 				activeTeamID = wctx.TeamID
-				wireCallbacks(wctx)
+				router.Set(wctx)
 			}
 
 			// Build channel lookup maps for notifications
