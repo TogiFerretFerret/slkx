@@ -2,20 +2,12 @@ package slackclient
 
 import (
 	"encoding/json"
-	"log"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/gammons/slk/internal/debuglog"
 	"github.com/slack-go/slack"
 )
-
-// debugWS is true when SLK_DEBUG_WS is set. When enabled, dispatchWebSocketEvent
-// logs every unknown WebSocket event type (with a truncated payload) to the
-// standard logger — useful for reverse-engineering undocumented Slack events
-// such as sidebar-section updates. Pair with SLK_DEBUG=1 to route logs to
-// /tmp/slk-debug.log.
-var debugWS = os.Getenv("SLK_DEBUG_WS") != ""
 
 // EventHandler processes real-time events from Slack.
 type EventHandler interface {
@@ -372,15 +364,15 @@ func dispatchWebSocketEvent(data []byte, handler EventHandler) {
 		// Could store for reconnection; ignoring for now
 
 	default:
-		// Ignore other event types. When SLK_DEBUG_WS is set, dump them
-		// to the debug log so we can reverse-engineer undocumented
+		// Ignore other event types. When debug logging is on, dump them
+		// to the [ws] category so we can reverse-engineer undocumented
 		// events (e.g. sidebar-section updates).
-		if debugWS {
+		if debuglog.Enabled() {
 			payload := data
 			if len(payload) > 4096 {
 				payload = payload[:4096]
 			}
-			log.Printf("[ws] unknown event type=%q raw=%s", evt.Type, string(payload))
+			debuglog.WS("unknown event type=%q raw=%s", evt.Type, string(payload))
 		}
 	}
 }

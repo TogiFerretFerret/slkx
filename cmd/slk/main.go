@@ -2438,9 +2438,7 @@ func (h *rtmEventHandler) OnChannelSectionChannelsRemoved(sectionID string, chan
 // re-render. Other prefs are ignored — add a case here when slk grows
 // support for them.
 func (h *rtmEventHandler) OnPrefChange(name, value string) {
-	if debugWSEvents {
-		log.Printf("pref_change received: name=%q value-len=%d", name, len(value))
-	}
+	debuglog.WS("pref_change received: name=%q value-len=%d", name, len(value))
 	// Both names are routes to mute state. all_notifications_prefs is
 	// the live per-channel notification blob (current Slack); the flat
 	// muted_channels pref is legacy back-compat.
@@ -2451,17 +2449,12 @@ func (h *rtmEventHandler) OnPrefChange(name, value string) {
 		return
 	}
 	changed := h.wsCtx.MuteStore.ApplyPrefChange(name, value)
-	log.Printf("pref_change %s for %s: changed=%v muted=%v", name, h.wsCtx.TeamName, changed, h.wsCtx.MuteStore.MutedChannels())
+	debuglog.WS("pref_change %s for %s: changed=%v muted=%v", name, h.wsCtx.TeamName, changed, h.wsCtx.MuteStore.MutedChannels())
 	if !changed {
 		return
 	}
 	h.refreshMutedForActive()
 }
-
-// debugWSEvents flips on extra per-event logging when SLK_DEBUG_WS is
-// set. Same env var the slack package uses for unknown-event dumps;
-// reuse so users can flip both on with one variable.
-var debugWSEvents = os.Getenv("SLK_DEBUG_WS") != ""
 
 // refreshMutedForActive walks wctx.Channels, refreshes each item's
 // IsMuted flag from the current MuteStore, and posts a
