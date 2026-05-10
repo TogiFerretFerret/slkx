@@ -151,6 +151,10 @@ func main() {
 	if debugFile, err := debuglog.Init(); err != nil {
 		fmt.Fprintf(os.Stderr, "slk: could not open debug log: %v\n", err)
 	} else if debugFile != nil {
+		// Defer fires only on the clean main() return path; os.Exit
+		// in the flag-handling block below skips it. That's fine —
+		// the OS reclaims the FD on process exit and stdlib log
+		// writes are unbuffered, so no log lines are lost.
 		defer debugFile.Close()
 		debuglog.General("=== slk debug session started ===")
 	}
