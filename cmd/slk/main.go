@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1079,6 +1080,13 @@ func run() error {
 		}
 	}
 
+	// firstReady gates the "first workspace to connect wins" logic when
+	// no default_workspace is configured. sync.Once ensures exactly one
+	// connect goroutine claims the initial active slot, eliminating the
+	// race where two simultaneous WorkspaceReadyMsgs both observed
+	// activeTeamID == "" and both set InitialActive=true.
+	var firstReady sync.Once
+
 	// Start the TUI immediately (shows loading overlay)
 	p = tea.NewProgram(app)
 
@@ -1107,15 +1115,20 @@ func run() error {
 			// If default_workspace resolved to a team ID, only that
 			// workspace claims active. Otherwise the first to connect
 			// claims it.
-			claimActive := false
+			isInitial := false
 			if defaultTeamID != "" {
-				claimActive = wctx.TeamID == defaultTeamID
+				if wctx.TeamID == defaultTeamID {
+					isInitial = true
+					router.Set(wctx)
+					activeTeamID = wctx.TeamID
+				}
+				// else: not the configured default; never claim.
 			} else {
-				claimActive = activeTeamID == ""
-			}
-			if claimActive {
-				activeTeamID = wctx.TeamID
-				router.Set(wctx)
+				firstReady.Do(func() {
+					isInitial = true
+					router.Set(wctx)
+					activeTeamID = wctx.TeamID
+				})
 			}
 
 			// Build channel lookup maps for notifications
@@ -1159,7 +1172,7 @@ func run() error {
 				UserID:           wctx.UserID,
 				CustomEmoji:      wctx.CustomEmoji, // empty at this point; filled by the goroutine below
 				SectionsProvider: sectionsProviderAdapter{store: wctx.SectionStore},
-				InitialActive:    claimActive,
+				InitialActive:    isInitial,
 			})
 
 			// Fetch workspace custom emojis in the background. When done,
