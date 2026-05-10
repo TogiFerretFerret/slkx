@@ -669,7 +669,13 @@ type App struct {
 	activeTeamID    string // workspace whose data is currently loaded into the side panels
 
 	// Callbacks
-	channelFetcher     ChannelFetchFunc
+	channelFetcher ChannelFetchFunc
+	// channelReadMarker fires Slack's MarkChannel + cache.UpdateLastReadTS
+	// for the given channel up to ts. Returns a tea.Msg (typically
+	// ChannelMarkedReadMsg). Wired in cmd/slk/main.go's wireCallbacks.
+	// Tier 1 of ChannelSelectedMsg (cache fresh, no GetHistory) uses this
+	// to keep mark-as-read working without firing the full fetcher.
+	channelReadMarker  func(channelID, ts string) tea.Msg
 	channelCacheReader ChannelCacheReadFunc
 	// channelSyncedAtReader returns the unix timestamp (seconds) at which
 	// the channel's cache was last authoritatively replaced from the
@@ -3946,6 +3952,14 @@ func (a *App) SetChannels(items []sidebar.ChannelItem) {
 // SetChannelFetcher sets the callback used to load messages when a channel is selected.
 func (a *App) SetChannelFetcher(fn ChannelFetchFunc) {
 	a.channelFetcher = fn
+}
+
+// SetChannelReadMarker installs the mark-as-read callback. Wired in
+// cmd/slk/main.go alongside SetChannelFetcher (the fetcher keeps its
+// own mark-as-read side-effect for Tier 2/3; this callback exists
+// purely so Tier 1 can mark-as-read without GetHistory).
+func (a *App) SetChannelReadMarker(fn func(channelID, ts string) tea.Msg) {
+	a.channelReadMarker = fn
 }
 
 // SetChannelCacheReader sets the callback consulted synchronously on
