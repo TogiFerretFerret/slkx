@@ -997,6 +997,40 @@ func (m *Model) SetUserNames(names map[string]string) {
 	m.dirty()
 }
 
+// PatchUserName updates the in-memory userNames map (used for @mention
+// rendering) and overwrites the UserName field on every cached message
+// authored by userID. Invalidates the render cache so the next View()
+// re-renders affected rows. Idempotent: no-op when the name is
+// unchanged.
+//
+// Used by the async user-resolution path: history fetchers stash
+// MessageItem.UserName = m.UserID for unknown authors, then a
+// UserResolvedMsg arrives and the App calls PatchUserName to replace
+// the placeholders live without re-fetching history.
+func (m *Model) PatchUserName(userID, displayName string) {
+	if userID == "" {
+		return
+	}
+	if m.userNames == nil {
+		m.userNames = map[string]string{}
+	}
+	if m.userNames[userID] == displayName {
+		return
+	}
+	m.userNames[userID] = displayName
+	changed := false
+	for i := range m.messages {
+		if m.messages[i].UserID == userID && m.messages[i].UserName != displayName {
+			m.messages[i].UserName = displayName
+			changed = true
+		}
+	}
+	if changed {
+		m.cache = nil
+	}
+	m.dirty()
+}
+
 // SetChannelNames sets the channel ID -> name map used to resolve bare
 // <#CHANNELID> mentions (Slack-side messages from clients that emit
 // channel mentions without the embedded |name).

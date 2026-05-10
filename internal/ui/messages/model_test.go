@@ -855,3 +855,53 @@ func TestLoadingOlderMessagesHintAnimatesAcrossFrames(t *testing.T) {
 		t.Errorf("output still contains stale frame-0 hint %q:\n%s", frame0Hint, out)
 	}
 }
+
+func TestPatchUserName_UpdatesMatchingRowsAndUserNamesMap(t *testing.T) {
+	m := New([]MessageItem{
+		{TS: "1.0", UserID: "U1", UserName: "U1", Text: "hi"},
+		{TS: "2.0", UserID: "U2", UserName: "alice", Text: "hey"},
+		{TS: "3.0", UserID: "U1", UserName: "U1", Text: "again"},
+	}, "general")
+
+	verBefore := m.Version()
+
+	m.PatchUserName("U1", "bob")
+
+	if m.messages[0].UserName != "bob" {
+		t.Errorf("msg[0].UserName = %q, want bob", m.messages[0].UserName)
+	}
+	if m.messages[1].UserName != "alice" {
+		t.Errorf("msg[1].UserName should not have changed; got %q", m.messages[1].UserName)
+	}
+	if m.messages[2].UserName != "bob" {
+		t.Errorf("msg[2].UserName = %q, want bob", m.messages[2].UserName)
+	}
+	if got := m.ResolveUserName("U1"); got != "bob" {
+		t.Errorf("ResolveUserName(U1) = %q, want bob", got)
+	}
+	if m.Version() <= verBefore {
+		t.Error("Version should bump after PatchUserName")
+	}
+}
+
+func TestPatchUserName_NoOpWhenUnchanged(t *testing.T) {
+	m := New([]MessageItem{{TS: "1.0", UserID: "U1", UserName: "bob"}}, "general")
+	m.PatchUserName("U1", "bob") // prime the userNames map
+	verBefore := m.Version()
+
+	m.PatchUserName("U1", "bob") // second call, identical
+
+	if m.Version() != verBefore {
+		t.Error("Version should NOT bump on no-op PatchUserName")
+	}
+}
+
+func TestPatchUserName_NoMatchingMessagesStillUpdatesMap(t *testing.T) {
+	m := New([]MessageItem{{TS: "1.0", UserID: "U1", UserName: "alice"}}, "general")
+
+	m.PatchUserName("U99", "carol")
+
+	if got := m.ResolveUserName("U99"); got != "carol" {
+		t.Errorf("ResolveUserName(U99) = %q, want carol (mention map should update even with no message match)", got)
+	}
+}
