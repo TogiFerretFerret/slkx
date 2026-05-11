@@ -60,13 +60,21 @@ func (db *DB) UpsertMessage(m Message) error {
 // OLDEST N rows, which is wrong for any cache that keeps growing as
 // new messages arrive.
 func (db *DB) GetMessages(channelID string, limit int, beforeTS string) ([]Message, error) {
-	// Main channel feed = top-level messages (thread_ts empty) plus
-	// thread broadcasts (thread_ts set, but subtype=thread_broadcast).
+	// Main channel feed includes three row shapes:
+	//   1. Plain top-level messages: thread_ts = ''.
+	//   2. Thread parents: thread_ts = ts (Slack's conversations.history
+	//      sets a parent's thread_ts to its own ts once it has replies;
+	//      WS events for the parent itself arrive with thread_ts = '',
+	//      so the cache holds the empty form until a GetHistory fetch
+	//      upserts the parent form).
+	//   3. Thread broadcasts: thread_ts != '' but subtype = 'thread_broadcast'.
+	// Plain replies (thread_ts != '' && thread_ts != ts && subtype != broadcast)
+	// belong to the thread panel, not the main feed.
 	inner := `
 		SELECT ts, channel_id, workspace_id, user_id, text, thread_ts, reply_count, edited_at, is_deleted, raw_json, created_at, subtype
 		FROM messages
 		WHERE channel_id = ? AND is_deleted = 0
-		  AND (thread_ts = '' OR subtype = 'thread_broadcast')`
+		  AND (thread_ts = '' OR thread_ts = ts OR subtype = 'thread_broadcast')`
 	args := []any{channelID}
 
 	if beforeTS != "" {

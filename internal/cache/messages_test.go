@@ -247,3 +247,63 @@ func TestGetThreadReplies(t *testing.T) {
 		t.Errorf("expected 2 replies, got %d", len(replies))
 	}
 }
+
+// TestGetMessages_IncludesThreadParents guards against the regression
+// where thread parents (top-level messages whose thread_ts equals
+// their own ts because they have replies) were excluded from
+// GetMessages by the original `thread_ts = ''` filter. Slack's
+// conversations.history returns parents with thread_ts == ts, so an
+// active channel quickly accumulates parents that the cache view
+// silently dropped until the next network refresh masked the bug.
+func TestGetMessages_IncludesThreadParents(t *testing.T) {
+	db := setupDBWithWorkspace(t)
+	defer db.Close()
+	db.UpsertChannel(Channel{ID: "C1", WorkspaceID: "T1", Name: "general", Type: "channel", IsMember: true})
+
+	// Plain top-level message (thread_ts="").
+	if err := db.UpsertMessage(Message{
+		TS: "1700000001.000000", ChannelID: "C1", WorkspaceID: "T1",
+		UserID: "U1", Text: "plain top",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Thread parent: thread_ts == ts, reply_count > 0.
+	if err := db.UpsertMessage(Message{
+		TS: "1700000002.000000", ChannelID: "C1", WorkspaceID: "T1",
+		UserID: "U1", Text: "thread parent",
+		ThreadTS: "1700000002.000000", ReplyCount: 3,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Plain reply (must NOT appear in the main feed).
+	if err := db.UpsertMessage(Message{
+		TS: "1700000003.000000", ChannelID: "C1", WorkspaceID: "T1",
+		UserID: "U2", Text: "thread reply",
+		ThreadTS: "1700000002.000000",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.GetMessages("C1", 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var foundPlain, foundParent bool
+	for _, m := range got {
+		switch m.Text {
+		case "plain top":
+			foundPlain = true
+		case "thread parent":
+			foundParent = true
+		case "thread reply":
+			t.Error("plain reply should NOT appear in main feed")
+		}
+	}
+	if !foundPlain {
+		t.Error("plain top-level message missing")
+	}
+	if !foundParent {
+		t.Error("thread parent missing — regression of the thread_ts==ts filter bug")
+	}
+}
