@@ -44,6 +44,8 @@ func parseOne(b slack.Block) Block {
 		}
 	case *slack.ActionBlock:
 		return parseActions(v)
+	case *slack.RichTextBlock:
+		return RichTextBlock{Elements: v.Elements}
 	default:
 		return UnknownBlock{Type: string(b.BlockType())}
 	}

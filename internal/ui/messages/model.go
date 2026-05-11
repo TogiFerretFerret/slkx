@@ -401,6 +401,28 @@ func (m *Model) HandleImageFailed(key string) {
 // could change.
 func (m *Model) Version() int64 { return m.version }
 
+// MessageTextSource returns the mrkdwn string that should be rendered
+// as the visible message body. For most messages it's just msg.Text,
+// but for messages whose body originated as a rich_text block (typical
+// of bot apps like GitHub Pending Reviews, PagerDuty, etc.) Slack's
+// text fallback collapses standalone "\n" elements into spaces — so
+// we reconstruct a newline-faithful mrkdwn from the parsed block when
+// one is available. See blockkit.RichTextToMrkdwn.
+//
+// When no RichTextBlock is present (the overwhelmingly common case
+// for user-typed messages) this is a zero-cost passthrough of
+// msg.Text.
+func MessageTextSource(msg MessageItem) string {
+	for _, b := range msg.Blocks {
+		if rt, ok := b.(blockkit.RichTextBlock); ok {
+			if reconstructed := blockkit.RichTextToMrkdwn(rt); reconstructed != "" {
+				return reconstructed
+			}
+		}
+	}
+	return msg.Text
+}
+
 // dirty bumps the render-version counter.
 func (m *Model) dirty() { m.version++ }
 
@@ -1412,7 +1434,7 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 		contentWidth = 20
 	}
 
-	text := styles.MessageText.Render(WordWrap(RenderSlackMarkdown(msg.Text, userNames, channelNames), contentWidth))
+	text := styles.MessageText.Render(WordWrap(RenderSlackMarkdown(MessageTextSource(msg), userNames, channelNames), contentWidth))
 
 	var threadLine string
 	if msg.ReplyCount > 0 {

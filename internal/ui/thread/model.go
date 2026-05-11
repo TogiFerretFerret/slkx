@@ -1341,7 +1341,7 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 		contentWidth = 20
 	}
 
-	text := styles.MessageText.Render(messages.WordWrap(messages.RenderSlackMarkdown(msg.Text, userNames, channelNames), contentWidth))
+	text := styles.MessageText.Render(messages.WordWrap(messages.RenderSlackMarkdown(messages.MessageTextSource(msg), userNames, channelNames), contentWidth))
 
 	var reactionLine string
 	if len(msg.Reactions) > 0 {

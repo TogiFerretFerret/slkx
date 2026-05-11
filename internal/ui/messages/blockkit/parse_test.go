@@ -188,16 +188,26 @@ func TestParseUnknownBlockTypePreservesType(t *testing.T) {
 	}
 }
 
-func TestParseRichTextBecomesUnknownToFallThroughToText(t *testing.T) {
-	// rich_text is intentionally not walked; we want it to land in
-	// UnknownBlock so the renderer can produce a placeholder. The
-	// host's Message.Text fallback handles the actual content.
+func TestParseRichTextProducesRichTextBlock(t *testing.T) {
+	// rich_text blocks are parsed into a typed RichTextBlock so the
+	// host can reconstruct a newline-faithful mrkdwn body from
+	// them. Slack's Message.Text fallback is a lossy projection of
+	// rich_text (newlines collapse to spaces), so we cannot rely on
+	// it for multi-line block-kit messages from bots like GitHub.
 	in := slack.Blocks{BlockSet: []slack.Block{
-		slack.NewRichTextBlock("rt"),
+		slack.NewRichTextBlock("rt",
+			slack.NewRichTextSection(
+				slack.NewRichTextSectionTextElement("hello", nil),
+			),
+		),
 	}}
 	got := Parse(in)
-	if _, ok := got[0].(UnknownBlock); !ok {
-		t.Errorf("got %T, want UnknownBlock for rich_text", got[0])
+	rt, ok := got[0].(RichTextBlock)
+	if !ok {
+		t.Fatalf("got %T, want RichTextBlock for rich_text", got[0])
+	}
+	if len(rt.Elements) != 1 {
+		t.Fatalf("RichTextBlock.Elements len = %d, want 1", len(rt.Elements))
 	}
 }
 

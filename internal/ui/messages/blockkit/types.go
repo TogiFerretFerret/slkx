@@ -17,6 +17,8 @@ import (
 	"image"
 	"io"
 
+	"github.com/slack-go/slack"
+
 	imgpkg "github.com/gammons/slk/internal/image"
 )
 
@@ -91,13 +93,34 @@ func (ActionsBlock) blockType() string { return "actions" }
 
 // UnknownBlock is the catch-all for any block type the package does
 // not handle. Its Type field is the original Slack block-type string
-// (e.g. "video", "rich_text", "markdown", "file"). It renders as a
-// single muted placeholder line.
+// (e.g. "video", "markdown", "file"). It renders as a single muted
+// placeholder line.
 type UnknownBlock struct {
 	Type string
 }
 
 func (b UnknownBlock) blockType() string { return b.Type }
+
+// RichTextBlock is the Slack `rich_text` block: an ordered list of
+// rich_text_section / rich_text_list / rich_text_preformatted /
+// rich_text_quote elements that together describe a fully-styled
+// message body. We keep the slack-go inline element types as-is
+// rather than mirror the whole type hierarchy, because the renderer
+// path for rich_text routes through the host's mrkdwn pipeline (see
+// RichTextToMrkdwn) — there's no need for a parallel typed tree.
+//
+// Slack also exposes a flattened mrkdwn `text` field on every
+// message that contains a rich_text block, BUT that fallback is
+// lossy: standalone "\n" elements collapse into spaces, so any
+// multi-line bot message (GitHub Pending Reviews, build digests,
+// etc.) renders horizontally if we trust the `text` field. The
+// host detects a RichTextBlock and substitutes RichTextToMrkdwn's
+// output before passing through to RenderSlackMarkdown.
+type RichTextBlock struct {
+	Elements []slack.RichTextElement
+}
+
+func (RichTextBlock) blockType() string { return "rich_text" }
 
 // AccessoryElement is one of the supported section-accessory element
 // kinds. The set is intentionally narrow: image accessories render via

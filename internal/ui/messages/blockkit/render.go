@@ -49,15 +49,14 @@ func appendBlock(out *RenderResult, b Block, ctx Context, width int) {
 		appendActions(out, v, width)
 	case ImageBlock:
 		appendImageBlock(out, v, ctx, width)
+	case RichTextBlock:
+		// rich_text content is rendered through Message.Text by the
+		// host (after RichTextToMrkdwn reconstructs the newline
+		// structure that Slack's text fallback strips), so the
+		// block renderer itself emits zero lines to avoid
+		// double-rendering.
+		return
 	case UnknownBlock:
-		if isSilentSkip(v.Type) {
-			// Silent skip: rich_text and similar block types have
-			// their content rendered through Message.Text by the
-			// host, so we don't want to emit a placeholder next to
-			// the body. Spec: see "rich_text scope" in the design
-			// doc.
-			return
-		}
 		out.Lines = append(out.Lines, renderUnsupported(v.Type, width))
 	default:
 		// Other block types (Context, Image, Actions) are added by
@@ -429,18 +428,6 @@ func renderUnsupported(typeName string, width int) string {
 		label = truncateToWidth(label, width)
 	}
 	return mutedStyle().Render(label)
-}
-
-// isSilentSkip returns true for known block types whose content is
-// already rendered through other means (most notably Message.Text for
-// rich_text). The host's text body suffices for these; emitting an
-// "[unsupported block: ...]" marker would just clutter the output.
-func isSilentSkip(blockType string) bool {
-	switch blockType {
-	case "rich_text":
-		return true
-	}
-	return false
 }
 
 // truncateToWidth returns s truncated by display columns to at most

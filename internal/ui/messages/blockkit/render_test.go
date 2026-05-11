@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/slack-go/slack"
 )
 
 func TestRenderEmptyBlocksProducesNoLines(t *testing.T) {
@@ -70,13 +71,22 @@ func TestRenderUnknownBlockShowsTypePlaceholder(t *testing.T) {
 }
 
 func TestRenderRichTextProducesNoOutput(t *testing.T) {
-	// rich_text is intentionally not walked (the host renders the
-	// Message.Text field instead). The block must produce zero
-	// lines so it doesn't add a "[unsupported block: rich_text]"
-	// marker next to the body text on every user-typed message.
-	r := Render([]Block{UnknownBlock{Type: "rich_text"}}, Context{}, 80)
+	// rich_text content is rendered by the host through Message.Text
+	// (with content reconstructed via RichTextToMrkdwn when needed),
+	// so the block renderer itself must emit zero lines for a
+	// RichTextBlock — otherwise we'd double-render alongside the
+	// text body.
+	rt := RichTextBlock{Elements: []slack.RichTextElement{
+		&slack.RichTextSection{
+			Type: slack.RTESection,
+			Elements: []slack.RichTextSectionElement{
+				&slack.RichTextSectionTextElement{Type: slack.RTSEText, Text: "hello"},
+			},
+		},
+	}}
+	r := Render([]Block{rt}, Context{}, 80)
 	if r.Height != 0 {
-		t.Errorf("Height = %d, want 0", r.Height)
+		t.Errorf("Height = %d, want 0 (rich_text rendered through Message.Text)", r.Height)
 	}
 	if len(r.Lines) != 0 {
 		t.Errorf("Lines = %v, want empty", r.Lines)
