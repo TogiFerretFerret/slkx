@@ -25,6 +25,7 @@ type historyFetcher interface {
 	GetHistorySince(ctx context.Context, channelID, oldest string, maxTotal int) (slackclient.HistorySinceResult, error)
 	GetReplies(ctx context.Context, channelID, threadTS string) ([]slack.Message, error)
 	ListThreadSubscriptions(ctx context.Context) ([]slackclient.ThreadSubscriptionView, error)
+	GetUnreadCounts() ([]slackclient.UnreadInfo, slackclient.ThreadsAggregate, error)
 }
 
 // teaSender is the subset of *tea.Program the backfiller uses to
@@ -104,11 +105,27 @@ func newBackfiller(client historyFetcher, db *cache.DB, workspaceID, selfUserID 
 // One channel's failure does not abort the pass; failures are logged
 // and the goroutine moves on.
 func (b *backfiller) runChannelPhase(ctx context.Context) error {
-	channels, err := b.db.ChannelsWithMessages(b.workspaceID)
+	// Fetch the server's unread map first so we can include channels
+	// the user has never opened in slk (e.g., a brand-new DM that
+	// arrived during an offline window). Failures are non-fatal: we
+	// fall back to the cached-channels-only set.
+	var unreadIDs []string
+	if unreads, _, err := b.client.GetUnreadCounts(); err != nil {
+		debuglog.Backfill("team=%s GetUnreadCounts err=%v (falling back to cached-only)", b.workspaceID, err)
+	} else {
+		for _, u := range unreads {
+			if u.HasUnread {
+				unreadIDs = append(unreadIDs, u.ChannelID)
+			}
+		}
+	}
+
+	channels, err := b.db.BackfillCandidates(b.workspaceID, unreadIDs)
 	if err != nil {
 		return err
 	}
-	debuglog.Backfill("team=%s trigger=reconnect channels=%d start", b.workspaceID, len(channels))
+	debuglog.Backfill("team=%s trigger=reconnect channels=%d unread_only=%d start",
+		b.workspaceID, len(channels), len(unreadIDs))
 	start := time.Now()
 
 	sem := make(chan struct{}, b.concurrency)

@@ -35,6 +35,16 @@ type fakeHistory struct {
 	subscriptionsResponse []slackclient.ThreadSubscriptionView
 	subscriptionsErr      error
 	subscriptionsCalls    int
+
+	unreads    []slackclient.UnreadInfo
+	threadsAgg slackclient.ThreadsAggregate
+}
+
+// GetUnreadCounts satisfies historyFetcher. Returns the preconfigured
+// unread/aggregate values. Defaults (nil/zero) yield an empty unread
+// set, which is what every pre-existing backfill test expects.
+func (f *fakeHistory) GetUnreadCounts() ([]slackclient.UnreadInfo, slackclient.ThreadsAggregate, error) {
+	return f.unreads, f.threadsAgg, nil
 }
 
 // ListThreadSubscriptions satisfies historyFetcher. Returns the
@@ -544,6 +554,49 @@ func TestBackfill_FullFetch_AdvancesWatermarkToMaxTS(t *testing.T) {
 	want := "1700001000.000002"
 	if got != want {
 		t.Errorf("watermark not advanced to MAX(ts): got %q want %q", got, want)
+	}
+}
+
+// TestBackfill_NewDM_NoCachedMessages_IsCaughtUp verifies the
+// brand-new-DM case: a DM the user has never opened in slk (no
+// channel row, no cached messages) but which Slack reports as having
+// unreads via client.counts must be included in the reconnect
+// backfill. Pre-Task-4, ChannelsWithMessages excluded it entirely.
+func TestBackfill_NewDM_NoCachedMessages_IsCaughtUp(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// D1 is a DM that has never been opened in slk: no UpsertChannel,
+	// no cached messages. Slack tells us via client.counts that it
+	// has unreads.
+	fh := &fakeHistory{
+		history: map[string][]slack.Message{
+			"D1": {{Msg: slack.Msg{
+				Type:      "message",
+				Timestamp: "1700009999.000001",
+				User:      "U_FRIEND",
+				Text:      "hey, you up?",
+			}}},
+		},
+		unreads: []slackclient.UnreadInfo{
+			{ChannelID: "D1", HasUnread: true, Count: 1, LastRead: "0"},
+		},
+	}
+
+	bf := newBackfiller(fh, db, "T1", "U_ME", nil, 1, 10, nil)
+	if err := bf.run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	msgs, err := db.GetMessages("D1", 10, "")
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 cached message for D1, got %d", len(msgs))
+	}
+	if msgs[0].TS != "1700009999.000001" {
+		t.Errorf("wrong ts: got %q want %q", msgs[0].TS, "1700009999.000001")
 	}
 }
 
