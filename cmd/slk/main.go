@@ -817,6 +817,19 @@ func run() error {
 			return wctx.LastReadMap[channelID]
 		})
 
+		app.SetReadStateReader(func() map[string]cache.ReadState {
+			wctx := router.Active()
+			if wctx == nil {
+				return nil
+			}
+			state, err := db.GetWorkspaceReadState(wctx.TeamID)
+			if err != nil {
+				log.Printf("Warning: GetWorkspaceReadState for %s: %v", wctx.TeamID, err)
+				return nil
+			}
+			return state
+		})
+
 		app.SetChannelVisitRecorder(func(channelID string) {
 			wctx := router.Active()
 			if wctx == nil {

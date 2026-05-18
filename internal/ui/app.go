@@ -241,6 +241,14 @@ type (
 		TeamID    string
 		ChannelID string
 	}
+	// ReadStateChangedMsg is sent whenever the persistent read state changes,
+	// so panels that read from cache.GetWorkspaceReadState re-render.
+	// ChannelID may be "" if the change is multi-channel (e.g., batch update
+	// from reconnect catch-up).
+	ReadStateChangedMsg struct {
+		WorkspaceID string
+		ChannelID   string
+	}
 	// ConversationOpenedMsg is sent when Slack delivers an mpim_open,
 	// im_created, group_joined, or channel_joined event. The TeamID
 	// disambiguates events for inactive workspaces; only events whose
@@ -2206,6 +2214,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case WorkspaceUnreadMsg:
 		a.workspaceRail.SetUnread(msg.TeamID, true)
+
+	case ReadStateChangedMsg:
+		// Persistent read state changed in the cache. Invalidate the
+		// sidebar so the next render re-reads from the DB.
+		a.sidebar.Invalidate()
+		return a, nil
 
 	case ConversationOpenedMsg:
 		if msg.TeamID == a.activeTeamID {
@@ -4255,6 +4269,13 @@ func (a *App) SetThreadMarker(fn ThreadMarkFunc) {
 // the unread boundary sits when they open a thread. Optional.
 func (a *App) SetChannelLastReadFetcher(fn func(channelID string) string) {
 	a.channelLastReadFetcher = fn
+}
+
+// SetReadStateReader installs a callback the sidebar (and any future
+// readers) will call at render time to fetch per-channel read state.
+// Must be set before the first render for unread dots to appear.
+func (a *App) SetReadStateReader(f func() map[string]cache.ReadState) {
+	a.sidebar.SetReadStateReader(f)
 }
 
 // SetChannelVisitRecorder wires the callback that persists a channel

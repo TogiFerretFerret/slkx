@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/gammons/slk/internal/cache"
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/styles"
@@ -196,6 +197,11 @@ type Model struct {
 	// orderedSections function returns the provider's verbatim order
 	// and headers are keyed by section ID instead of name.
 	sectionsProvider SectionsProvider
+	// readStateReader returns the per-channel read state map for the
+	// active workspace, keyed by channel ID. Set by App via
+	// SetReadStateReader. May be nil — nil means "treat everything as
+	// no-unread" (used during early construction).
+	readStateReader func() map[string]cache.ReadState
 	// collapseByID parallels `collapsed` for Slack-mode (ID-keyed).
 	// Renames preserve collapse state because the ID is stable.
 	// Populated lazily; lookups treat nil as empty. Used in Task 9.
@@ -261,6 +267,23 @@ func (m *Model) SetSectionsProvider(p SectionsProvider) {
 	m.sectionsProvider = p
 	m.rebuildFilter()
 	m.rebuildNavPreserveCursor()
+	m.cacheValid = false
+	m.dirty()
+}
+
+// SetReadStateReader installs a callback that returns the per-channel
+// read state map for the workspace currently presented by this sidebar.
+// Called by View() at render time. Setting it invalidates the row cache
+// so the next render reflects the new source.
+func (m *Model) SetReadStateReader(f func() map[string]cache.ReadState) {
+	m.readStateReader = f
+	m.cacheValid = false
+	m.dirty()
+}
+
+// Invalidate forces the next View() call to re-read read state from
+// the installed reader. Called by App.Update on ReadStateChangedMsg.
+func (m *Model) Invalidate() {
 	m.cacheValid = false
 	m.dirty()
 }
