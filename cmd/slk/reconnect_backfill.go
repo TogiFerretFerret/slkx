@@ -130,6 +130,11 @@ func (b *backfiller) runChannelPhase(ctx context.Context) error {
 		if len(updates) > 0 {
 			if err := b.db.BatchUpdateChannelReadState(updates); err != nil {
 				debuglog.Backfill("team=%s BatchUpdateChannelReadState err=%v", b.workspaceID, err)
+			} else if b.program != nil {
+				// Force the sidebar (and workspace rail, once wired in Task 16)
+				// to re-render with the freshly-caught-up read state. This is
+				// the catch-up notification for Symptom 2.
+				b.program.Send(ui.ReadStateChangedMsg{WorkspaceID: b.workspaceID})
 			}
 		}
 	}
