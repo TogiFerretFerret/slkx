@@ -2,6 +2,7 @@ package mentionpicker
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -214,6 +215,55 @@ func TestSpecialMentionsAlwaysInChannel(t *testing.T) {
 func TestMaxVisibleSeven(t *testing.T) {
 	if MaxVisible != 7 {
 		t.Errorf("MaxVisible = %d, want 7", MaxVisible)
+	}
+}
+
+func TestViewNoEmptyParensForRegularUser(t *testing.T) {
+	m := New()
+	m.SetUsers([]User{{ID: "U1", DisplayName: "jane.doe", InChannel: true}})
+	m.Open()
+	out := m.View(40)
+	if strings.Contains(out, "()") {
+		t.Errorf("view contains empty parens: %q", out)
+	}
+	if !strings.Contains(out, "jane.doe") {
+		t.Errorf("view missing display name: %q", out)
+	}
+}
+
+func TestViewKeepsParensForSpecialMentions(t *testing.T) {
+	m := New()
+	m.SetUsers(nil)
+	m.Open()
+	out := m.View(40)
+	for _, want := range []string{"(here)", "(channel)", "(everyone)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view missing %q: %q", want, out)
+		}
+	}
+}
+
+func TestViewExternalSuffix(t *testing.T) {
+	m := New()
+	m.SetUsers([]User{
+		{ID: "U1", DisplayName: "jenny.kim", InChannel: true, IsExternal: true},
+	})
+	m.Open()
+	out := m.View(60)
+	if !strings.Contains(out, "(ext)") {
+		t.Errorf("expected (ext) suffix: %q", out)
+	}
+}
+
+func TestViewNotInChannelSuffix(t *testing.T) {
+	m := New()
+	m.SetUsers([]User{
+		{ID: "U1", DisplayName: "jordan.lee", InChannel: false},
+	})
+	m.Open()
+	out := m.View(60)
+	if !strings.Contains(out, "(not in channel)") {
+		t.Errorf("expected (not in channel) suffix: %q", out)
 	}
 }
 

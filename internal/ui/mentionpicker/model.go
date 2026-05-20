@@ -173,15 +173,46 @@ func (m *Model) View(width int) string {
 
 	var rows []string
 	for i, u := range m.filtered {
+		selected := i == m.selected
+
 		indicator := "  "
-		nameStyle := lipgloss.NewStyle().Foreground(styles.TextPrimary)
-		if i == m.selected {
+		if selected {
 			indicator = lipgloss.NewStyle().Foreground(styles.Accent).Render("▌ ")
+		}
+
+		// Name color: muted for not-in-channel rows at rest;
+		// upgraded to TextPrimary when selected (per spec).
+		nameColor := styles.TextPrimary
+		if !u.InChannel && !selected {
+			nameColor = styles.TextMuted
+		}
+		nameStyle := lipgloss.NewStyle().Foreground(nameColor)
+		if selected {
 			nameStyle = nameStyle.Bold(true)
 		}
 
-		label := fmt.Sprintf("%s (%s)", u.DisplayName, u.Username)
+		// Special mentions keep "(Username)" in TextPrimary (the
+		// historical, intentional behavior). Regular users get no
+		// parenthetical here (the dead empty-parens fix).
+		label := u.DisplayName
+		if u.Username != "" {
+			label = fmt.Sprintf("%s (%s)", u.DisplayName, u.Username)
+		}
+
 		row := indicator + nameStyle.Render(label)
+
+		// Suffix in TextMuted, always (even when row is selected).
+		var suffix string
+		switch {
+		case !u.InChannel:
+			suffix = " (not in channel)"
+		case u.IsExternal:
+			suffix = " (ext)"
+		}
+		if suffix != "" {
+			row += lipgloss.NewStyle().Foreground(styles.TextMuted).Render(suffix)
+		}
+
 		rows = append(rows, row)
 	}
 
@@ -191,7 +222,7 @@ func (m *Model) View(width int) string {
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
 		Background(styles.SurfaceDark).
-		Width(width - 2). // account for border
+		Width(width - 2).
 		Render(content)
 
 	return box
