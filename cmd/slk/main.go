@@ -3228,6 +3228,14 @@ func (h *rtmEventHandler) OnPrefChange(name, value string) {
 	h.refreshMutedForActive()
 }
 
+func (h *rtmEventHandler) OnMemberJoined(channelID, userID string) {
+	// TODO(membership-plan-task-13): wire to membership.Manager.
+}
+
+func (h *rtmEventHandler) OnMemberLeft(channelID, userID string) {
+	// TODO(membership-plan-task-13): wire to membership.Manager.
+}
+
 // refreshMutedForActive walks wctx.Channels, refreshes each item's
 // IsMuted flag from the current MuteStore, and posts a
 // SectionsRefreshedMsg so the App rebuilds the sidebar from the
