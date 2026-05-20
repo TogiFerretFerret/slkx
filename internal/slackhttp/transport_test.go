@@ -3,6 +3,7 @@ package slackhttp
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -20,9 +21,9 @@ func (c *captureRT) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func newCaptureClient(t *testing.T, srv *httptest.Server) (*http.Client, *captureRT) {
 	t.Helper()
-	cap := &captureRT{wrapped: http.DefaultTransport}
-	bt := &BrowserTransport{Inner: cap}
-	return &http.Client{Transport: bt}, cap
+	recorder := &captureRT{wrapped: http.DefaultTransport}
+	bt := &BrowserTransport{Inner: recorder}
+	return &http.Client{Transport: bt}, recorder
 }
 
 func TestBrowserTransport_AddsHeadersToSlackHosts(t *testing.T) {
@@ -30,10 +31,13 @@ func TestBrowserTransport_AddsHeadersToSlackHosts(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	client, cap := newCaptureClient(t, srv)
+	client, recorder := newCaptureClient(t, srv)
 
 	// Force the request to look like it's going to slack.com by rewriting Host.
-	req, _ := http.NewRequest("GET", srv.URL, nil)
+	req, err := http.NewRequest("GET", srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Host = "slack.com"
 	resp, err := client.Do(req)
 	if err != nil {
@@ -41,7 +45,7 @@ func TestBrowserTransport_AddsHeadersToSlackHosts(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	got := cap.last
+	got := recorder.last
 	if !strings.HasPrefix(got.Header.Get("User-Agent"), "Mozilla/5.0") {
 		t.Errorf("User-Agent = %q; want Mozilla/5.0-prefixed Chrome UA", got.Header.Get("User-Agent"))
 	}
@@ -66,15 +70,18 @@ func TestBrowserTransport_MatchesSlackSubdomains(t *testing.T) {
 	hosts := []string{"slack.com", "files.slack.com", "hackclub.enterprise.slack.com", "wss-primary.slack.com"}
 	for _, h := range hosts {
 		t.Run(h, func(t *testing.T) {
-			client, cap := newCaptureClient(t, srv)
-			req, _ := http.NewRequest("GET", srv.URL, nil)
+			client, recorder := newCaptureClient(t, srv)
+			req, err := http.NewRequest("GET", srv.URL, nil)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
 			req.Host = h
 			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatalf("Do: %v", err)
 			}
 			resp.Body.Close()
-			if cap.last.Header.Get("Origin") == "" {
+			if recorder.last.Header.Get("Origin") == "" {
 				t.Errorf("host %s: Origin header missing; expected the transport to recognize this as a Slack host", h)
 			}
 		})
@@ -86,8 +93,11 @@ func TestBrowserTransport_DoesNotTouchNonSlackHosts(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	client, cap := newCaptureClient(t, srv)
-	req, _ := http.NewRequest("GET", srv.URL, nil)
+	client, recorder := newCaptureClient(t, srv)
+	req, err := http.NewRequest("GET", srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Host = "example.com"
 	resp, err := client.Do(req)
 	if err != nil {
@@ -95,10 +105,10 @@ func TestBrowserTransport_DoesNotTouchNonSlackHosts(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if cap.last.Header.Get("Origin") != "" {
-		t.Errorf("Origin set on non-Slack host: %q", cap.last.Header.Get("Origin"))
+	if recorder.last.Header.Get("Origin") != "" {
+		t.Errorf("Origin set on non-Slack host: %q", recorder.last.Header.Get("Origin"))
 	}
-	if ua := cap.last.Header.Get("User-Agent"); strings.HasPrefix(ua, "Mozilla/5.0") {
+	if ua := recorder.last.Header.Get("User-Agent"); strings.HasPrefix(ua, "Mozilla/5.0") {
 		t.Errorf("browser User-Agent leaked to non-Slack host: %q", ua)
 	}
 }
@@ -108,8 +118,11 @@ func TestBrowserTransport_DoesNotOverrideCallerHeaders(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	client, cap := newCaptureClient(t, srv)
-	req, _ := http.NewRequest("GET", srv.URL, nil)
+	client, recorder := newCaptureClient(t, srv)
+	req, err := http.NewRequest("GET", srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Host = "slack.com"
 	req.Header.Set("User-Agent", "custom-agent/1.0")
 	req.Header.Set("Authorization", "Bearer xoxc-test")
@@ -120,14 +133,43 @@ func TestBrowserTransport_DoesNotOverrideCallerHeaders(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if got := cap.last.Header.Get("User-Agent"); got != "custom-agent/1.0" {
+	if got := recorder.last.Header.Get("User-Agent"); got != "custom-agent/1.0" {
 		t.Errorf("User-Agent was overridden: got %q, want custom-agent/1.0", got)
 	}
-	if got := cap.last.Header.Get("Authorization"); got != "Bearer xoxc-test" {
+	if got := recorder.last.Header.Get("Authorization"); got != "Bearer xoxc-test" {
 		t.Errorf("Authorization was overridden: %q", got)
 	}
-	if got := cap.last.Header.Get("Cookie"); got != "d=test-cookie" {
+	if got := recorder.last.Header.Get("Cookie"); got != "d=test-cookie" {
 		t.Errorf("Cookie was overridden: %q", got)
+	}
+}
+
+func TestBrowserTransport_HandlesNilHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	// Literal request — Header is nil, URL is set, Host forces Slack-host match.
+	req := &http.Request{
+		Method: "GET",
+		URL:    u,
+		Host:   "slack.com",
+	}
+
+	client, recorder := newCaptureClient(t, srv)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	resp.Body.Close()
+
+	if recorder.last.Header.Get("Origin") != "https://app.slack.com" {
+		t.Errorf("Origin header missing after nil-Header request")
 	}
 }
 

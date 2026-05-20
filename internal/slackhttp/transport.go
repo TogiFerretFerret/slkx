@@ -27,10 +27,16 @@ type BrowserTransport struct {
 
 // RoundTrip implements http.RoundTripper.
 func (t *BrowserTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if isSlackHost(req.URL.Host) || isSlackHost(req.Host) {
+	if (req.URL != nil && isSlackHost(req.URL.Host)) || isSlackHost(req.Host) {
 		// Clone the request so we don't mutate the caller's copy — net/http's
 		// RoundTripper contract forbids in-place modification.
 		req = req.Clone(req.Context())
+		// http.Header.Clone() returns nil when its receiver is nil, so a
+		// caller who constructed *http.Request as a literal without setting
+		// Header would otherwise hit a "nil map" panic on the first Set.
+		if req.Header == nil {
+			req.Header = http.Header{}
+		}
 		setIfMissing(req.Header, "User-Agent", UserAgent())
 		setIfMissing(req.Header, "Accept", "*/*")
 		setIfMissing(req.Header, "Accept-Language", "en-US,en;q=0.9")
