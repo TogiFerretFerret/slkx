@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/gammons/slk/internal/text"
 	"github.com/gammons/slk/internal/ui/styles"
 )
 
@@ -120,10 +121,10 @@ func (m *Model) Select() *ChannelResult {
 }
 
 func (m *Model) filter() {
-	q := strings.ToLower(m.query)
+	q := text.Fold(m.query)
 	var results []Channel
 	for _, c := range m.channels {
-		if q == "" || strings.HasPrefix(strings.ToLower(c.Name), q) {
+		if q == "" || strings.HasPrefix(text.Fold(c.Name), q) {
 			results = append(results, c)
 		}
 	}
