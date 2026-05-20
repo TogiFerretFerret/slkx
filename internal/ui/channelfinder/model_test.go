@@ -689,3 +689,139 @@ func TestFilterAccentInsensitive(t *testing.T) {
 		})
 	}
 }
+
+// TestSyntheticItemsPinnedAtTopEmptyQuery verifies that synthetic
+// destinations (e.g. the Threads view) sort above all real channels under
+// empty-query, regardless of LastVisited. This is what makes the entry
+// discoverable when the user opens the finder and hits Enter without
+// typing.
+func TestSyntheticItemsPinnedAtTopEmptyQuery(t *testing.T) {
+	m := New()
+	m.SetSyntheticItems([]Item{{
+		ID: ThreadsViewID, Name: "Threads", Type: "threads", Joined: true,
+	}})
+	m.SetItems([]Item{
+		// Recent visit — would normally sort first.
+		{ID: "C1", Name: "general", Type: "channel", Joined: true, LastVisited: 9999},
+		{ID: "C2", Name: "random", Type: "channel", Joined: true, LastVisited: 500},
+	})
+	m.Open()
+
+	if len(m.filtered) != 3 {
+		t.Fatalf("want 3 filtered (1 synthetic + 2 channels), got %d", len(m.filtered))
+	}
+	first := m.items[m.filtered[0]]
+	if first.ID != ThreadsViewID {
+		t.Errorf("synthetic Threads should pin to position 0 under empty-query; got %q (LastVisited=%d)",
+			first.ID, first.LastVisited)
+	}
+}
+
+// TestSyntheticItemEnterReturnsThreadsType verifies that selecting the
+// synthetic row returns a ChannelResult whose Type marks it as a view
+// destination. Callers (app.go) use Type=="threads" to dispatch
+// ThreadsViewActivatedMsg instead of switching channels.
+func TestSyntheticItemEnterReturnsThreadsType(t *testing.T) {
+	m := New()
+	m.SetSyntheticItems([]Item{{
+		ID: ThreadsViewID, Name: "Threads", Type: "threads", Joined: true,
+	}})
+	m.SetItems([]Item{
+		{ID: "C1", Name: "general", Type: "channel", Joined: true, LastVisited: 9999},
+	})
+	m.Open()
+
+	r := m.HandleKey("enter")
+	if r == nil {
+		t.Fatal("enter on pinned synthetic returned nil")
+	}
+	if r.Type != "threads" || r.ID != ThreadsViewID {
+		t.Errorf("want Type=threads, ID=%s; got Type=%q, ID=%q",
+			ThreadsViewID, r.Type, r.ID)
+	}
+}
+
+// TestSyntheticItemSurvivesSetItems verifies that calling SetItems after
+// SetSyntheticItems does NOT drop the synthetic row — without this
+// guarantee, every workspace bootstrap (which fires SetItems) would erase
+// the Threads view shortcut and force the user to click to reach it.
+func TestSyntheticItemSurvivesSetItems(t *testing.T) {
+	m := New()
+	m.SetSyntheticItems([]Item{{
+		ID: ThreadsViewID, Name: "Threads", Type: "threads", Joined: true,
+	}})
+	m.SetItems([]Item{
+		{ID: "C1", Name: "general", Type: "channel", Joined: true},
+	})
+	// Second SetItems, simulating a workspace re-bootstrap.
+	m.SetItems([]Item{
+		{ID: "C2", Name: "random", Type: "channel", Joined: true},
+	})
+
+	var found bool
+	for _, it := range m.items {
+		if it.ID == ThreadsViewID {
+			found = true
+			if !it.Synthetic {
+				t.Error("synthetic flag dropped on SetItems")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("synthetic Threads item dropped on SetItems")
+	}
+}
+
+// TestSyntheticItemSurvivesSetBrowseable verifies the synthetic row
+// survives a SetBrowseable mutation (which is how the finder learns about
+// public channels the user hasn't joined yet).
+func TestSyntheticItemSurvivesSetBrowseable(t *testing.T) {
+	m := New()
+	m.SetSyntheticItems([]Item{{
+		ID: ThreadsViewID, Name: "Threads", Type: "threads", Joined: true,
+	}})
+	m.SetItems([]Item{
+		{ID: "C1", Name: "general", Type: "channel", Joined: true},
+	})
+	m.SetBrowseable([]Item{
+		{ID: "C2", Name: "announcements", Type: "channel"},
+	})
+
+	var found bool
+	for _, it := range m.items {
+		if it.ID == ThreadsViewID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("synthetic Threads item dropped on SetBrowseable")
+	}
+}
+
+// TestSyntheticItemMatchesByName verifies that with a query active, the
+// synthetic row ranks by name match like any other item (so typing a few
+// letters of "threads" surfaces it).
+func TestSyntheticItemMatchesByName(t *testing.T) {
+	m := New()
+	m.SetSyntheticItems([]Item{{
+		ID: ThreadsViewID, Name: "Threads", Type: "threads", Joined: true,
+	}})
+	m.SetItems([]Item{
+		{ID: "C1", Name: "general", Type: "channel", Joined: true},
+	})
+	m.Open()
+
+	m.HandleKey("t")
+	m.HandleKey("h")
+	m.HandleKey("r")
+
+	if len(m.filtered) == 0 {
+		t.Fatal("expected synthetic to match query 'thr'")
+	}
+	if m.items[m.filtered[0]].ID != ThreadsViewID {
+		t.Errorf("want first match = synthetic Threads, got %q",
+			m.items[m.filtered[0]].Name)
+	}
+}

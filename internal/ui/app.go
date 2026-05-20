@@ -1000,6 +1000,16 @@ func NewApp() *App {
 	// before the first workspace finishes loading customs.
 	app.compose.SetEmojiEntries(emoji.BuildEntries(nil))
 	app.threadCompose.SetEmojiEntries(emoji.BuildEntries(nil))
+	// Seed the channel finder with the "Threads" view shortcut so users
+	// can jump to the threads-list view from the same overlay they use
+	// to switch channels (ctrl+t / ctrl+p). Selecting this row dispatches
+	// ThreadsViewActivatedMsg in handleChannelFinderMode below.
+	app.channelFinder.SetSyntheticItems([]channelfinder.Item{{
+		ID:     channelfinder.ThreadsViewID,
+		Name:   "Threads",
+		Type:   "threads",
+		Joined: true,
+	}})
 	// Seed the statusbar hint with the configured help key label so it
 	// stays accurate if the binding is ever changed.
 	if helpKey := app.keys.Help.Help().Key; helpKey != "" {
@@ -3203,6 +3213,12 @@ func (a *App) handleChannelFinderMode(msg tea.KeyMsg) tea.Cmd {
 	if result != nil {
 		a.channelFinder.Close()
 		a.SetMode(ModeNormal)
+		// Synthetic destinations (e.g. Threads view) live alongside
+		// channels in the finder but route to a view activation rather
+		// than a channel switch.
+		if result.Type == "threads" {
+			return func() tea.Msg { return ThreadsViewActivatedMsg{} }
+		}
 		// Already-joined: switch immediately. Not joined: kick off a join
 		// command; ChannelJoinedMsg will fold the channel into the sidebar
 		// and switch to it.

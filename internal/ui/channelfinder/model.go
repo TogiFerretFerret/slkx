@@ -18,11 +18,16 @@ import (
 // not at all).
 var nonJoinedColor = lipgloss.Color("#5a5a5a")
 
+// ThreadsViewID is the sentinel ID used for the synthetic "Threads" entry.
+// Callers detect this in a ChannelResult (Type=="threads") to activate the
+// threads-list view instead of switching channels.
+const ThreadsViewID = "__slk_view_threads"
+
 // ChannelResult is returned when the user selects a channel.
 type ChannelResult struct {
 	ID     string
 	Name   string
-	Type   string // channel, dm, group_dm, private
+	Type   string // channel, dm, group_dm, private, threads
 	Joined bool   // false => caller should join the channel before opening it
 }
 
@@ -30,7 +35,7 @@ type ChannelResult struct {
 type Item struct {
 	ID       string
 	Name     string
-	Type     string // channel, dm, group_dm, private
+	Type     string // channel, dm, group_dm, private, threads
 	Presence string // for DMs: active, away
 	Joined   bool   // true if the user is already a member; false for browseable public channels
 	// LastVisited is the unix timestamp (seconds) of the user's most
@@ -39,6 +44,12 @@ type Item struct {
 	// LastVisited DESC, and on a query LastVisited breaks ties within
 	// a match tier.
 	LastVisited int64
+	// Synthetic marks non-channel destinations (e.g. "Threads") that
+	// the finder pins above real channels under empty-query and that
+	// callers route differently (e.g. activating a view rather than
+	// opening a channel). These items are preserved across SetItems
+	// and SetBrowseable mutations so the finder always offers them.
+	Synthetic bool
 }
 
 // Model is the fuzzy channel finder overlay.
@@ -55,9 +66,51 @@ func New() Model {
 	return Model{}
 }
 
-// SetItems updates the searchable channel list.
+// SetItems updates the searchable channel list. Synthetic items previously
+// registered via SetSyntheticItems are preserved at the front of the list so
+// non-channel destinations (e.g. the Threads view) remain reachable across
+// workspace bootstraps.
 func (m *Model) SetItems(items []Item) {
-	m.items = items
+	synth := m.extractSynthetic()
+	m.items = append(synth, items...)
+}
+
+// SetSyntheticItems replaces the set of non-channel destinations the finder
+// offers alongside channels (e.g. the Threads view). These rows are pinned
+// above real channels under empty-query and preserved across SetItems /
+// SetBrowseable. Pass nil to clear.
+func (m *Model) SetSyntheticItems(items []Item) {
+	// Drop existing synthetic rows; keep real channels intact.
+	keep := m.items[:0]
+	for _, it := range m.items {
+		if !it.Synthetic {
+			keep = append(keep, it)
+		}
+	}
+	// Prepend the new synthetic rows, marking each.
+	merged := make([]Item, 0, len(items)+len(keep))
+	for _, it := range items {
+		it.Synthetic = true
+		merged = append(merged, it)
+	}
+	merged = append(merged, keep...)
+	m.items = merged
+	if m.visible {
+		m.filter()
+	}
+}
+
+// extractSynthetic returns the currently registered synthetic items in their
+// existing order; used by SetItems / SetBrowseable to preserve them across
+// list mutations.
+func (m *Model) extractSynthetic() []Item {
+	var synth []Item
+	for _, it := range m.items {
+		if it.Synthetic {
+			synth = append(synth, it)
+		}
+	}
+	return synth
 }
 
 // MarkJoined flips the Joined bit on a channel that the user just joined,
@@ -89,20 +142,21 @@ func (m *Model) UpdateLastVisited(channelID string, ts int64) {
 }
 
 // SetBrowseable replaces the non-joined channel entries in the finder.
-// Joined items (added via SetItems) are preserved; previous non-joined items
-// are dropped and replaced with the new set. Items whose IDs already appear
-// among the joined entries are skipped to avoid duplicates.
+// Joined items (added via SetItems) and synthetic destinations (added via
+// SetSyntheticItems) are preserved; previous non-joined items are dropped
+// and replaced with the new set. Items whose IDs already appear among the
+// joined / synthetic entries are skipped to avoid duplicates.
 func (m *Model) SetBrowseable(browseable []Item) {
-	// Drop existing non-joined items and build an ID set of joined items.
-	joined := m.items[:0]
+	// Drop existing non-joined items; keep joined + synthetic rows.
+	keep := m.items[:0]
 	have := make(map[string]struct{}, len(m.items))
 	for _, it := range m.items {
-		if it.Joined {
-			joined = append(joined, it)
+		if it.Joined || it.Synthetic {
+			keep = append(keep, it)
 			have[it.ID] = struct{}{}
 		}
 	}
-	m.items = joined
+	m.items = keep
 	for _, it := range browseable {
 		if _, dup := have[it.ID]; dup {
 			continue
@@ -189,12 +243,15 @@ func (m *Model) HandleKey(keyStr string) *ChannelResult {
 // filter rebuilds the filtered list based on the current query.
 //
 // Ranking precedence (most significant first):
-//  1. Joined (members of the channel/DM come before non-members)
-//  2. Match tier: prefix > substring > subsequence (only when querying)
-//  3. LastVisited DESC (recency of user's last visit)
-//  4. Subsequence score DESC (only relevant in the subsequence tier)
-//  5. typeRank ASC (group_dm demoted; 1:1 DMs and channels equal)
-//  6. Name ASC (case-insensitive)
+//  1. Synthetic destinations (e.g. Threads view) under empty-query — pinned
+//     to the top so non-channel views are always discoverable. With a query,
+//     synthetic items rank by name match like everything else.
+//  2. Joined (members of the channel/DM come before non-members)
+//  3. Match tier: prefix > substring > subsequence (only when querying)
+//  4. LastVisited DESC (recency of user's last visit)
+//  5. Subsequence score DESC (only relevant in the subsequence tier)
+//  6. typeRank ASC (group_dm demoted; 1:1 DMs and channels equal)
+//  7. Name ASC (case-insensitive)
 //
 // Matching tiers:
 //  1. Prefix matches  (e.g. "eng" matches "engineering")
@@ -337,10 +394,13 @@ func isSeparator(r rune) bool {
 }
 
 // lessNoQuery reports whether item a should sort before item b when no
-// search query is active. Order: Joined DESC, LastVisited DESC,
-// typeRank ASC, Name ASC (case-insensitive).
+// search query is active. Order: Synthetic DESC (pinned top), Joined DESC,
+// LastVisited DESC, typeRank ASC, Name ASC (case-insensitive).
 func (m *Model) lessNoQuery(ai, bi int) bool {
 	a, b := m.items[ai], m.items[bi]
+	if a.Synthetic != b.Synthetic {
+		return a.Synthetic
+	}
 	if a.Joined != b.Joined {
 		return a.Joined
 	}
@@ -557,6 +617,15 @@ func (m Model) renderBox(termWidth int) string {
 // channelPrefix returns the display prefix for a channel type.
 func channelPrefix(item Item) string {
 	switch item.Type {
+	case "threads":
+		// Single-cell flag glyph marks the synthetic "Threads" row as
+		// a destination, not a channel. We use ⚑ (U+2691) rather than
+		// the 🚩 emoji because emoji glyphs occupy two terminal cells
+		// in most fonts, which shifts the row's name one column to
+		// the right and breaks alignment with the channel/DM prefixes
+		// around it. Accent color keeps it visually distinct without
+		// double-width.
+		return lipgloss.NewStyle().Foreground(styles.Accent).Render("⚑")
 	case "private":
 		return lipgloss.NewStyle().Foreground(styles.Warning).Render("◆")
 	case "dm":

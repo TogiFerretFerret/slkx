@@ -690,6 +690,40 @@ func TestApp_HandleEnterOnThreadsRowActivatesView(t *testing.T) {
 	}
 }
 
+// TestApp_ChannelFinderThreadsRowActivatesThreadsView guards the
+// discoverability fix for the threads-list view: pressing ctrl+t (or
+// ctrl+p) and hitting Enter on the pinned "Threads" row in the finder
+// must dispatch ThreadsViewActivatedMsg, not ChannelSelectedMsg. Before
+// the synthetic row existed, the only way to reach the threads view was
+// to click the Threads sidebar entry.
+func TestApp_ChannelFinderThreadsRowActivatesThreadsView(t *testing.T) {
+	app := NewApp()
+	app.activeTeamID = "T1"
+	// Open the finder the same way the ctrl+t / ctrl+p binding does.
+	app.channelFinder.Open()
+	app.SetMode(ModeChannelFinder)
+
+	// The synthetic Threads row is pinned at the top under empty-query,
+	// so a single Enter must select it.
+	cmd := app.handleChannelFinderMode(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected a tea.Cmd from selecting the Threads row, got nil")
+	}
+	msg := cmd()
+	if _, ok := msg.(ThreadsViewActivatedMsg); !ok {
+		t.Errorf("Enter on synthetic Threads row dispatched %T, want ThreadsViewActivatedMsg",
+			msg)
+	}
+
+	// Finder should have closed and mode reverted to normal.
+	if app.channelFinder.IsVisible() {
+		t.Error("channel finder should close after selecting the Threads row")
+	}
+	if app.mode != ModeNormal {
+		t.Errorf("mode after selection = %v, want ModeNormal", app.mode)
+	}
+}
+
 // TestApp_ClickOnThreadInThreadsViewOpensIt guards Bug B: a left-click
 // on a thread card in the threads-list view must select that card AND
 // open the corresponding thread. Before the fix, the messages-pane
