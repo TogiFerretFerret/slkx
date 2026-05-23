@@ -25,7 +25,6 @@ import (
 	"github.com/gammons/slk/internal/debuglog"
 	"github.com/gammons/slk/internal/emoji"
 	imgpkg "github.com/gammons/slk/internal/image"
-	"github.com/gammons/slk/internal/slack/mrkdwn"
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/channelpicker"
 	"github.com/gammons/slk/internal/ui/compose"
@@ -385,6 +384,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.bootstrap,
 		reduceReactions,
 		reduceThreads,
+		reduceSend,
 	); handled {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -968,253 +968,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// previewLoadedMsg, previewErrorMsg moved to
 	// imagePreviewController.Handle (Phase 4b, see reducers.go).
 
-	case NewMessageMsg:
-		debuglog.Cache("NewMessageMsg: channel=%s ts=%s thread_ts=%s active=%s",
-			msg.ChannelID, msg.Message.TS, msg.Message.ThreadTS, a.activeChannelID)
-		if msg.Message.IsEdited {
-			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_edit_echo",
-				msg.ChannelID, msg.Message.TS)
-			// Edit echo: update existing message in place rather than
-			// appending. Gate on the active channel for the main pane
-			// and on the thread panel's channel for the thread cache —
-			// avoids touching panes showing a different channel. This
-			// branch must run BEFORE the isSelfSent dedup below, since
-			// edits to messages we recently sent would otherwise be
-			// silently dropped (the TS is still in selfSentTSes).
-			if msg.ChannelID == a.activeChannelID {
-				a.messagepane.UpdateMessageInPlace(msg.Message.TS, msg.Message.Text)
-			}
-			if msg.ChannelID == a.threadPanel.ChannelID() {
-				a.threadPanel.UpdateMessageInPlace(msg.Message.TS, msg.Message.Text)
-				a.threadPanel.UpdateParentInPlace(msg.Message.TS, msg.Message.Text)
-			}
-			break
-		}
-		// Skip the WS echo of our own optimistic add. The corresponding
-		// MessageSentMsg / ThreadReplySentMsg already updated the UI and
-		// scheduled side effects; redoing them here would double-render.
-		if a.selfSend.IsSelfSent(msg.Message.TS) {
-			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_self_send",
-				msg.ChannelID, msg.Message.TS)
-			break
-		}
-		// Early-arrival suppression: if the WS echo for an slk-
-		// originated send arrives BEFORE the chat.postMessage HTTP
-		// response (and therefore before recordSelfSent could fire),
-		// drop it for self-user messages. Otherwise the WS-echo
-		// version — which carries Slack's normalised text (paragraph
-		// breaks flattened for rich_text_block messages) — renders
-		// briefly, then flicker-replaces with the optimistic version.
-		// See markSelfSendInFlight / selfSendInFlight comments.
-		//
-		// Cross-session messages from this user (sent via the
-		// official Slack client while slk is open) do NOT update
-		// lastSelfSendByChannel, so they pass through this guard.
-		if msg.Message.UserID != "" && msg.Message.UserID == a.currentUserID && a.selfSend.InFlight(msg.ChannelID) {
-			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_self_send_in_flight",
-				msg.ChannelID, msg.Message.TS)
-			break
-		}
-		if msg.ChannelID == a.activeChannelID {
-			// "active_channel_no_unread_bump": message arrived for the
-			// currently-viewed channel, so it's appended to the message
-			// pane (not skipped) but no unread bump is applied — the
-			// user is actively reading.
-			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=active_channel_no_unread_bump",
-				msg.ChannelID, msg.Message.TS)
-			// Route thread replies to the thread panel if it matches the open thread
-			if a.threadVisible && msg.Message.ThreadTS == a.threadPanel.ThreadTS() {
-				a.threadPanel.AddReply(msg.Message)
-			}
-			// Always add to main pane if it's a top-level message (no ThreadTS or is the parent)
-			if msg.Message.ThreadTS == "" || msg.Message.ThreadTS == msg.Message.TS {
-				a.messagepane.AppendMessage(msg.Message)
-			}
-			// Update reply count on parent message when a thread reply arrives
-			if msg.Message.ThreadTS != "" && msg.Message.ThreadTS != msg.Message.TS {
-				a.messagepane.IncrementReplyCount(msg.Message.ThreadTS, msg.Message.TS)
-			}
-		} else {
-			// Message arrived for a channel the user isn't currently
-			// viewing — bump its unread count so the sidebar shows
-			// the dot + bold indicator. Active-channel messages are
-			// auto-marked-read elsewhere (MarkChannel on entry), so
-			// no sidebar update is needed there.
-			//
-			// Skip plain thread replies: a reply inside a thread does
-			// not mark the parent channel as unread on Slack — only
-			// top-level messages and thread_broadcasts do. The
-			// Threads view tracks its own unread state separately.
-			isThreadReply := msg.Message.ThreadTS != "" && msg.Message.ThreadTS != msg.Message.TS
-			if !isThreadReply || msg.Message.Subtype == "thread_broadcast" {
-				debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=mark_unread",
-					msg.ChannelID, msg.Message.TS)
-				// The DB write that flips has_unread=true for this
-				// channel already happened in the WS-handler path
-				// (cache.UpdateChannelReadState). Force the sidebar
-				// to re-read read state so the dot appears on the
-				// next render, and refresh the workspace rail so its
-				// HasUnread flag picks up the change too.
-				a.notifyReadStateChanged()
-			} else {
-				debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_thread_reply_inactive",
-					msg.ChannelID, msg.Message.TS)
-			}
-		}
-		// A thread reply (regardless of channel) may have changed the
-		// involved-threads list — schedule a debounced re-query so a burst
-		// of replies coalesces into a single fetch.
-		if msg.Message.ThreadTS != "" {
-			if c := a.scheduleThreadsDirty(); c != nil {
-				cmds = append(cmds, c)
-			}
-		}
-
-	case SendMessageMsg:
-		// Mark in-flight regardless of whether a sender is wired —
-		// the user's send intent is what controls WS-echo suppression
-		// for self-user messages on this channel.
-		a.selfSend.MarkInFlight(msg.ChannelID)
-		// Instant-display: append an optimistic placeholder for the
-		// active channel immediately, before the chat.postMessage HTTP
-		// round-trip. The placeholder carries a "local:<n>" TS so the
-		// MessageSentMsg / MessageSendFailedMsg handler can find and
-		// swap (or remove) it once the HTTP result lands.
-		//
-		// We only render the placeholder when the send is for the
-		// channel currently in view. For background sends (rare —
-		// would require sending while in a different view) we skip
-		// the placeholder; the HTTP response will fall back to
-		// UpsertSelfSent's append path.
-		//
-		// Convert the user-typed CommonMark to Slack mrkdwn before
-		// rendering so the placeholder picks up bold / italic / code /
-		// link styling immediately. Without this, "**bold**" would
-		// render literally until the chat.postMessage HTTP response
-		// landed and the swap dropped in Slack's converted form. The
-		// converter is the same one used by client.SendMessage, so
-		// the placeholder and the swapped message render identically
-		// for the common case (no rich_text_block paragraph quirks).
-		localTS := a.selfSend.NextLocalTS()
-		optimisticText, _ := mrkdwn.Convert(msg.Text)
-		if msg.ChannelID == a.activeChannelID {
-			a.messagepane.AppendMessage(messages.MessageItem{
-				TS:        localTS,
-				UserID:    a.currentUserID,
-				UserName:  a.userNameFor(a.currentUserID),
-				Text:      optimisticText,
-				Timestamp: a.nowFormatted(),
-			})
-		}
-		messageSvc := a.messageSvc
-		chID, text := msg.ChannelID, msg.Text
-		cmds = append(cmds, func() tea.Msg {
-			result := messageSvc.Send(chID, text)
-			// Attach LocalTS so the receiving handler can swap or
-			// remove the placeholder. Senders shouldn't need to
-			// know about LocalTS themselves.
-			switch r := result.(type) {
-			case MessageSentMsg:
-				r.LocalTS = localTS
-				return r
-			case MessageSendFailedMsg:
-				r.LocalTS = localTS
-				return r
-			}
-			return result
-		})
-
-	case MessageSentMsg:
-		// The chat.postMessage HTTP response landed. If a "local:..."
-		// placeholder is in the pane from the instant-display path
-		// (SendMessageMsg above), swap it for the authoritative
-		// message. Otherwise — e.g. test paths firing MessageSentMsg
-		// directly, or the user navigated away and back between
-		// Enter and the HTTP response — fall back to UpsertSelfSent
-		// which appends-or-replaces by Slack TS.
-		//
-		// UpsertSelfSent is also the fallback for any racing WS echo
-		// that managed to slip past selfSendInFlight: if AppendMessage
-		// stored the echo's normalised text first, UpsertSelfSent
-		// replaces it with our converted-mrkdwn text. See
-		// internal/ui/messages/model.go for both methods' contracts.
-		if msg.Message.TS != "" {
-			a.selfSend.RecordSent(msg.Message.TS)
-			if msg.ChannelID == a.activeChannelID {
-				if !a.messagepane.SwapLocalSent(msg.LocalTS, msg.Message) {
-					a.messagepane.UpsertSelfSent(msg.Message)
-				}
-			}
-		}
-
-	case MessageSendFailedMsg:
-		// The chat.postMessage HTTP call failed; roll back the
-		// optimistic placeholder so the user can see the send didn't
-		// go through. A toast surfaces the reason.
-		if msg.ChannelID == a.activeChannelID && msg.LocalTS != "" {
-			a.messagepane.RemoveLocalSent(msg.LocalTS)
-		}
-		cmds = append(cmds, func() tea.Msg {
-			return statusbar.SendFailedMsg{Reason: msg.Reason}
-		})
-
-	case EditMessageMsg:
-		a.selfSend.MarkInFlight(msg.ChannelID)
-		messageSvc := a.messageSvc
-		chID, ts, text := msg.ChannelID, msg.TS, msg.NewText
-		cmds = append(cmds, func() tea.Msg {
-			return messageSvc.Edit(chID, ts, text)
-		})
-
-	case MessageEditedMsg:
-		// Only exit edit mode if this result matches the edit that's
-		// currently in flight. A stale result from a previously
-		// cancelled or replaced edit must not clobber the current one.
-		if a.editing.Matches(msg.ChannelID, msg.TS) {
-			a.cancelEdit()
-		}
-		if msg.Err != nil {
-			cmds = append(cmds, func() tea.Msg {
-				return statusbar.EditFailedMsg{Reason: msg.Err.Error()}
-			})
-		}
-
-	case DeleteMessageMsg:
-		messageSvc := a.messageSvc
-		chID, ts := msg.ChannelID, msg.TS
-		cmds = append(cmds, func() tea.Msg {
-			return messageSvc.Delete(chID, ts)
-		})
-
-	case MarkUnreadMsg:
-		messageSvc := a.messageSvc
-		chID, threadTS, ts, n := msg.ChannelID, msg.ThreadTS, msg.BoundaryTS, msg.UnreadCount
-		cmds = append(cmds, func() tea.Msg {
-			return messageSvc.MarkUnread(chID, threadTS, ts, n)
-		})
-
-	case MessageDeletedMsg:
-		if msg.Err != nil {
-			cmds = append(cmds, func() tea.Msg {
-				return statusbar.DeleteFailedMsg{Reason: msg.Err.Error()}
-			})
-		}
-
-	case MessageMarkedUnreadMsg:
-		if msg.Err != nil {
-			cmds = append(cmds, func() tea.Msg {
-				return statusbar.MarkUnreadFailedMsg{Reason: msg.Err.Error()}
-			})
-			break
-		}
-		if msg.ThreadTS == "" {
-			a.applyChannelMark(msg.ChannelID, msg.BoundaryTS, msg.UnreadCount)
-		} else {
-			a.applyThreadMark(msg.ChannelID, msg.ThreadTS, msg.BoundaryTS, false)
-		}
-		cmds = append(cmds, func() tea.Msg {
-			return statusbar.MarkedUnreadMsg{}
-		})
+	// SendMessageMsg, MessageSentMsg, MessageSendFailedMsg, EditMessageMsg,
+	// MessageEditedMsg, DeleteMessageMsg, MarkUnreadMsg, MessageDeletedMsg,
+	// MessageMarkedUnreadMsg moved to reduceSend (Phase 4i,
+	// reducer_send.go).
 
 	case ChannelMarkedRemoteMsg:
 		a.applyChannelMark(msg.ChannelID, msg.TS, msg.UnreadCount)
@@ -1227,28 +984,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ConnectionStateMsg:
 		a.statusbar.SetConnectionState(statusbar.ConnectionState(msg.State))
 
-	case WSMessageDeletedMsg:
-		debuglog.Cache("WSMessageDeletedMsg: channel=%s ts=%s active=%s",
-			msg.ChannelID, msg.TS, a.activeChannelID)
-		if msg.ChannelID == a.activeChannelID {
-			a.messagepane.RemoveMessageByTS(msg.TS)
-		}
-		if msg.ChannelID == a.threadPanel.ChannelID() {
-			a.threadPanel.RemoveMessageByTS(msg.TS)
-		}
-		// If the deleted message is the one currently being edited,
-		// cancel the edit (the message is gone — submitting would fail).
-		if a.editing.Matches(msg.ChannelID, msg.TS) {
-			a.cancelEdit()
-		}
-		// If the deleted message was the open thread's parent, close
-		// the thread panel — Slack deletes the entire thread when the
-		// parent is deleted. Cancel any in-flight edit first so we
-		// don't leave the user in insert mode with a hidden compose.
-		if a.threadVisible && a.threadPanel.ThreadTS() == msg.TS && msg.ChannelID == a.threadPanel.ChannelID() {
-			a.cancelEdit()
-			a.CloseThread()
-		}
+	// WSMessageDeletedMsg moved to reduceSend (Phase 4i).
 
 	// ReactionAddedMsg, ReactionRemovedMsg, ReactionSentMsg moved
 	// to reduceReactions (Phase 4g, reducer_reactions.go).
