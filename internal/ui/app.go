@@ -363,39 +363,13 @@ type App struct {
 	typingSendFn   TypingSendFunc
 	lastTypingSent time.Time
 
-	// Self-sent message TS dedup. When the user posts a message or thread
-	// reply, the chat.postMessage HTTP response (MessageSentMsg /
-	// ThreadReplySentMsg) is used for an optimistic UI update. The Slack
-	// WebSocket may also deliver an echo of the same TS later -- or, in
-	// the case of self-posted thread replies on the internal flannel
-	// protocol, may not deliver one at all. Recording our own TSes lets
-	// us skip the echo if it arrives, while not relying on it for
-	// correctness.
-	selfSentTSes map[string]time.Time // TS -> when recorded
-
-	// lastSelfSendByChannel records when the user last submitted a
-	// send/edit/reply for a channel via slk. We use this to suppress
-	// the Slack WS echo of slk-originated messages BEFORE the
-	// chat.postMessage HTTP response returns: without this, the WS
-	// echo (which carries Slack's normalised text — paragraph breaks
-	// flattened for rich_text_block messages) renders briefly as a
-	// single-line message, then flicker-replaces with the optimistic
-	// version that has the correctly-converted mrkdwn. See
-	// internal/ui/messages/model.go:UpsertSelfSent for the late-
-	// arrival fix; this map closes the early-arrival flicker window.
-	//
-	// Cross-session messages (sent from the official Slack client
-	// while slk is open) do NOT update this map and continue to
-	// display via the normal WS-echo path.
-	lastSelfSendByChannel map[string]time.Time
-
-	// localTSCounter is incremented per optimistic-placeholder message
-	// so each one carries a unique TS-shaped ("local:<counter>") id.
-	// SendMessageMsg / SendThreadReplyMsg use this to mint a placeholder
-	// id, then MessageSentMsg / ThreadReplySentMsg uses it to swap the
-	// placeholder for the authoritative Slack-assigned TS once the
-	// chat.postMessage HTTP response arrives.
-	localTSCounter uint64
+	// selfSend tracks slk-originated message sends so WS echoes can
+	// be suppressed (preventing the visible flicker between Slack's
+	// normalised echo text and the optimistic instant-display text).
+	// See internal/ui/selfsend.go. Used for both channel-level
+	// in-flight suppression (before chat.postMessage's response
+	// returns) and TS-level exact-match suppression (after).
+	selfSend *selfSendDedup
 
 	// nowTimestampFormatter renders "now" using the same format used
 	// for message timestamps elsewhere (configured via
@@ -471,8 +445,7 @@ func NewApp() *App {
 		view:                 ViewChannels,
 		keys:                 DefaultKeyMap(),
 		typingUsers:          make(map[string]map[string]time.Time),
-		selfSentTSes:         make(map[string]time.Time),
-		lastSelfSendByChannel: make(map[string]time.Time),
+		selfSend:             newSelfSendDedup(),
 		threadsDirtyDebounce: 150 * time.Millisecond,
 		mouseWheelLines:      3,
 		userNames:            map[string]string{},
@@ -1313,7 +1286,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Skip the WS echo of our own optimistic add. The corresponding
 		// MessageSentMsg / ThreadReplySentMsg already updated the UI and
 		// scheduled side effects; redoing them here would double-render.
-		if a.isSelfSent(msg.Message.TS) {
+		if a.selfSend.IsSelfSent(msg.Message.TS) {
 			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_self_send",
 				msg.ChannelID, msg.Message.TS)
 			break
@@ -1330,7 +1303,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Cross-session messages from this user (sent via the
 		// official Slack client while slk is open) do NOT update
 		// lastSelfSendByChannel, so they pass through this guard.
-		if msg.Message.UserID != "" && msg.Message.UserID == a.currentUserID && a.selfSendInFlight(msg.ChannelID) {
+		if msg.Message.UserID != "" && msg.Message.UserID == a.currentUserID && a.selfSend.InFlight(msg.ChannelID) {
 			debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_self_send_in_flight",
 				msg.ChannelID, msg.Message.TS)
 			break
@@ -1394,7 +1367,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Mark in-flight regardless of whether a sender is wired —
 		// the user's send intent is what controls WS-echo suppression
 		// for self-user messages on this channel.
-		a.markSelfSendInFlight(msg.ChannelID)
+		a.selfSend.MarkInFlight(msg.ChannelID)
 		// Instant-display: append an optimistic placeholder for the
 		// active channel immediately, before the chat.postMessage HTTP
 		// round-trip. The placeholder carries a "local:<n>" TS so the
@@ -1415,7 +1388,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// converter is the same one used by client.SendMessage, so
 		// the placeholder and the swapped message render identically
 		// for the common case (no rich_text_block paragraph quirks).
-		localTS := a.nextLocalTS()
+		localTS := a.selfSend.NextLocalTS()
 		optimisticText, _ := mrkdwn.Convert(msg.Text)
 		if msg.ChannelID == a.activeChannelID {
 			a.messagepane.AppendMessage(messages.MessageItem{
@@ -1461,7 +1434,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// replaces it with our converted-mrkdwn text. See
 		// internal/ui/messages/model.go for both methods' contracts.
 		if msg.Message.TS != "" {
-			a.recordSelfSent(msg.Message.TS)
+			a.selfSend.RecordSent(msg.Message.TS)
 			if msg.ChannelID == a.activeChannelID {
 				if !a.messagepane.SwapLocalSent(msg.LocalTS, msg.Message) {
 					a.messagepane.UpsertSelfSent(msg.Message)
@@ -1481,7 +1454,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 	case EditMessageMsg:
-		a.markSelfSendInFlight(msg.ChannelID)
+		a.selfSend.MarkInFlight(msg.ChannelID)
 		if a.messageEditor != nil {
 			editor := a.messageEditor
 			chID, ts, text := msg.ChannelID, msg.TS, msg.NewText
@@ -1658,13 +1631,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case SendThreadReplyMsg:
-		a.markSelfSendInFlight(msg.ChannelID)
+		a.selfSend.MarkInFlight(msg.ChannelID)
 		// Instant-display: append an optimistic placeholder to the
 		// thread panel immediately, before the chat.postMessage HTTP
 		// round-trip. Mirrors the SendMessageMsg path; see there for
 		// the LocalTS / swap-or-remove contract and the mrkdwn.Convert
 		// rationale.
-		localTS := a.nextLocalTS()
+		localTS := a.selfSend.NextLocalTS()
 		optimisticText, _ := mrkdwn.Convert(msg.Text)
 		if a.threadVisible && msg.ThreadTS == a.threadPanel.ThreadTS() && msg.ChannelID == a.threadPanel.ChannelID() {
 			a.threadPanel.AddReply(messages.MessageItem{
@@ -1706,7 +1679,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// must apply all the side effects (parent reply count, threads
 		// dirty) here.
 		if msg.Message.TS != "" {
-			a.recordSelfSent(msg.Message.TS)
+			a.selfSend.RecordSent(msg.Message.TS)
 			// Update the thread panel whenever the visible thread matches,
 			// regardless of activeChannelID. When a thread is opened from
 			// the threads view, activeChannelID is not switched to the
@@ -4338,15 +4311,6 @@ func (a *App) nowFormatted() string {
 	return time.Now().Format("3:04 PM")
 }
 
-// nextLocalTS mints a unique placeholder id for an optimistic instant-
-// display message. The "local:" prefix makes it trivially
-// distinguishable from a Slack-assigned TS (which is always of the
-// form "<seconds>.<microseconds>").
-func (a *App) nextLocalTS() string {
-	a.localTSCounter++
-	return fmt.Sprintf("local:%d", a.localTSCounter)
-}
-
 func (a *App) SetFrecentFuncs(load FrecentLoadFunc, record FrecentRecordFunc) {
 	a.frecentLoadFn = load
 	a.frecentRecordFn = record
@@ -4475,70 +4439,6 @@ func (a *App) maybeSendTyping() {
 		channelID = a.threadPanel.ChannelID()
 	}
 	go a.typingSendFn(channelID)
-}
-
-// selfSendWindow is the maximum time we expect between a user's slk-
-// originated send (SendMessageMsg / EditMessageMsg / etc. dispatch) and
-// the matching chat.postMessage HTTP response landing as MessageSentMsg.
-// While markSelfSendInFlight has been called within this window for a
-// channel, NewMessageMsg suppresses self-user echoes for that channel
-// to avoid the visible flicker between WS echo and HTTP response.
-const selfSendWindow = 3 * time.Second
-
-// markSelfSendInFlight records that the user just submitted a slk-
-// originated send (chat.postMessage / chat.update / thread reply) for
-// channelID. While the timestamp is within selfSendWindow, the WS echo
-// for self-user messages on this channel is dropped so the optimistic
-// path is the sole renderer (and we don't flicker through Slack's
-// normalised text).
-func (a *App) markSelfSendInFlight(channelID string) {
-	if channelID == "" {
-		return
-	}
-	a.lastSelfSendByChannel[channelID] = time.Now()
-}
-
-// selfSendInFlight reports whether the user submitted an slk-originated
-// send for channelID within the last selfSendWindow. Cross-session
-// sends (e.g. from the official Slack client) never update the map,
-// so their WS echoes are not suppressed.
-func (a *App) selfSendInFlight(channelID string) bool {
-	t, ok := a.lastSelfSendByChannel[channelID]
-	if !ok {
-		return false
-	}
-	return time.Since(t) < selfSendWindow
-}
-
-// recordSelfSent marks a message TS as one the user just posted from this
-// session, so the WS echo (if any) can be skipped to avoid double-rendering.
-// Old entries are GC'd opportunistically; even if they leak, they're tiny
-// and only checked when echoes arrive.
-func (a *App) recordSelfSent(ts string) {
-	if ts == "" {
-		return
-	}
-	a.selfSentTSes[ts] = time.Now()
-	// Opportunistic cleanup: drop entries older than 5 minutes. WS echoes
-	// arrive within seconds; anything older is stale.
-	if len(a.selfSentTSes) > 64 {
-		cutoff := time.Now().Add(-5 * time.Minute)
-		for k, v := range a.selfSentTSes {
-			if v.Before(cutoff) {
-				delete(a.selfSentTSes, k)
-			}
-		}
-	}
-}
-
-// isSelfSent reports whether ts matches a message we recently posted from
-// this session.
-func (a *App) isSelfSent(ts string) bool {
-	if ts == "" {
-		return false
-	}
-	_, ok := a.selfSentTSes[ts]
-	return ok
 }
 
 // addTypingUser records that a user is typing in a channel.

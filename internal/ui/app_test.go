@@ -1204,7 +1204,7 @@ func TestApp_ThreadReplySentOptimisticallyAddsToThreadPanel(t *testing.T) {
 	if got := app.threadPanel.ReplyCount(); got != 1 {
 		t.Fatalf("expected 1 reply added optimistically, got %d", got)
 	}
-	if !app.isSelfSent("1700000050.000400") {
+	if !app.selfSend.IsSelfSent("1700000050.000400") {
 		t.Errorf("expected TS to be recorded as self-sent for echo dedup")
 	}
 }
@@ -1316,7 +1316,7 @@ func TestApp_MessageSentOptimisticallyAppendsToMessagepane(t *testing.T) {
 	if app.messagepane.Version() == beforeVer {
 		t.Errorf("expected messagepane version to advance after optimistic append")
 	}
-	if !app.isSelfSent("1700000999.000001") {
+	if !app.selfSend.IsSelfSent("1700000999.000001") {
 		t.Errorf("expected TS to be recorded for echo dedup")
 	}
 }
