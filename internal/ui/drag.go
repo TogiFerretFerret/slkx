@@ -26,6 +26,14 @@
 //	IDLE                   a plain click)
 package ui
 
+import (
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/gammons/slk/internal/ui/statusbar"
+)
+
 // dragState captures an in-progress mouse drag. The originating panel
 // (PanelMessages or PanelThread; PanelWorkspace == idle) clamps where
 // the drag's selection extends to — leaving the pane pins the extend
@@ -115,4 +123,163 @@ func (d *dragState) Finish() (moved bool, panel Panel, clickedMessage bool) {
 	clickedMessage = d.clickedMessage
 	*d = dragState{}
 	return
+}
+
+// autoScrollTickInterval is the cadence for the edge-autoscroll
+// tick chain while a drag is held against the top/bottom edge of a
+// scrollable pane. 50ms is fast enough to feel responsive but slow
+// enough not to overshoot small message lists.
+const autoScrollTickInterval = 50 * time.Millisecond
+
+// autoScrollTickCmd schedules the next autoScrollTickMsg. The chain
+// self-terminates when the drag ends or the cursor leaves the edge
+// (see Handle's autoScrollTickMsg arm).
+func autoScrollTickCmd() tea.Cmd {
+	return tea.Tick(autoScrollTickInterval, func(time.Time) tea.Msg {
+		return autoScrollTickMsg{}
+	})
+}
+
+// Handle is the drag-FSM reducer for App.Update (Phase 4c). Owns
+// the three Update arms that read/mutate drag state:
+//
+//   - tea.MouseMotionMsg  -- extend the selection + maybe start
+//     the autoscroll chain when the cursor hits an edge.
+//   - autoScrollTickMsg   -- one tick of the chain: scroll the
+//     originating pane, re-extend the selection, reschedule.
+//   - tea.MouseReleaseMsg -- finalize: plain click (open thread or
+//     clear selection) vs drag (copy selection to clipboard).
+//
+// tea.MouseClickMsg and tea.MouseWheelMsg deliberately do NOT route
+// through here. MouseClick is a multi-panel router (workspace rail,
+// sidebar, channels, reactions, image preview, drag-begin) whose
+// drag-begin is only one of many outcomes; MouseWheel is pure
+// viewport scrolling unrelated to drag. Both belong in a future
+// reducer_mouse.go (Phase 4m) once their non-drag responsibilities
+// have a home.
+//
+// Returns (nil, false) for any other message type.
+func (d *dragState) Handle(a *App, msg tea.Msg) (tea.Cmd, bool) {
+	switch m := msg.(type) {
+	case tea.MouseMotionMsg:
+		if a.bootstrap.IsLoading() {
+			return nil, true
+		}
+		if m.Button != tea.MouseLeft {
+			return nil, true
+		}
+		if !d.IsActive() {
+			return nil, true
+		}
+		panel, px, py, _ := a.panelAt(m.X, m.Y)
+		// Clamp to the originating pane: if the cursor leaves the
+		// pane, pin extension at the last known coordinates inside it.
+		px, py = d.Extend(panel, px, py)
+		switch d.Panel() {
+		case PanelMessages:
+			a.messagepane.ExtendSelectionAt(py, px)
+		case PanelThread:
+			a.threadPanel.ExtendSelectionAt(py, px)
+		}
+		// If the cursor is at the top/bottom edge of the originating
+		// pane, schedule an auto-scroll tick. ClaimAutoScroll returns
+		// true once until ClearAutoScroll resets it, guarding against
+		// parallel tick chains accumulating.
+		var hint int
+		switch d.Panel() {
+		case PanelMessages:
+			hint = a.messagepane.ScrollHintForDrag(py)
+		case PanelThread:
+			hint = a.threadPanel.ScrollHintForDrag(py)
+		}
+		if hint != 0 && d.ClaimAutoScroll() {
+			return autoScrollTickCmd(), true
+		}
+		return nil, true
+
+	case autoScrollTickMsg:
+		_ = m
+		// If the drag ended (release clears the drag state),
+		// self-terminate.
+		if !d.IsActive() {
+			d.ClearAutoScroll()
+			return nil, true
+		}
+		lastX, lastY := d.LastPos()
+		var hint int
+		switch d.Panel() {
+		case PanelMessages:
+			hint = a.messagepane.ScrollHintForDrag(lastY)
+		case PanelThread:
+			hint = a.threadPanel.ScrollHintForDrag(lastY)
+		}
+		if hint == 0 {
+			// Cursor left the edge -- stop ticking. Re-entering the
+			// edge in a future motion event will re-arm the loop.
+			d.ClearAutoScroll()
+			return nil, true
+		}
+		switch d.Panel() {
+		case PanelMessages:
+			if hint < 0 {
+				a.messagepane.ScrollUp(1)
+			} else {
+				a.messagepane.ScrollDown(1)
+			}
+			a.messagepane.ExtendSelectionAt(lastY, lastX)
+		case PanelThread:
+			if hint < 0 {
+				a.threadPanel.ScrollUp(1)
+			} else {
+				a.threadPanel.ScrollDown(1)
+			}
+			a.threadPanel.ExtendSelectionAt(lastY, lastX)
+		}
+		// Schedule the next tick. autoScrollActive remains true.
+		return autoScrollTickCmd(), true
+
+	case tea.MouseReleaseMsg:
+		_ = m
+		if !d.IsActive() {
+			return nil, true
+		}
+		moved, panel, clickedMessage := d.Finish()
+		if !moved {
+			// Plain click -- drop any previous pinned selection.
+			switch panel {
+			case PanelMessages:
+				a.messagepane.ClearSelection()
+				// Treat a click on a real message row as Enter:
+				// open that message's thread. Clicks that missed
+				// (chrome, empty space) leave the panel as-is.
+				if clickedMessage {
+					if cmd := a.openThreadForSelectedMessage(); cmd != nil {
+						return cmd, true
+					}
+				}
+			case PanelThread:
+				a.threadPanel.ClearSelection()
+			}
+			return nil, true
+		}
+		var (
+			text string
+			ok   bool
+		)
+		switch panel {
+		case PanelMessages:
+			text, ok = a.messagepane.EndSelection()
+		case PanelThread:
+			text, ok = a.threadPanel.EndSelection()
+		}
+		if !(ok && text != "") {
+			return nil, true
+		}
+		n := len([]rune(text))
+		return tea.Batch(
+			tea.SetClipboard(text),
+			func() tea.Msg { return statusbar.CopiedMsg{N: n} },
+		), true
+	}
+	return nil, false
 }
