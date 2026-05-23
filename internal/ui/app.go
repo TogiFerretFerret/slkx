@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"image"
-	"image/color"
 	"log"
 	"mime"
 	"os"
@@ -1848,15 +1847,7 @@ func (a *App) View() tea.View {
 	threadWidth := frame.ThreadWidth
 	threadBorder := frame.ThreadBorder
 
-	// Helper to force a panel to an exact width and height with a given
-	// background color. Uses an explicit width parameter instead of
-	// lipgloss.Width(s) to avoid ANSI miscounting in complex rendered content.
-	exactSizeBg := func(s string, w, h int, bg color.Color) string {
-		return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).Background(bg).Render(s)
-	}
-	exactSize := func(s string, w, h int) string {
-		return exactSizeBg(s, w, h, styles.Background)
-	}
+	// exactSize / exactSizeBg moved to view_helpers.go (Phase 6a).
 
 	themeVer := styles.Version()
 
