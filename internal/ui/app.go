@@ -2130,20 +2130,7 @@ func (a *App) View() tea.View {
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, panels...)
-	statusWidth := a.width - railWidth
-
-	// Cache the status row (rail-spacer + statusbar). It depends only on
-	// statusbar.Version, statusWidth, and theme.
-	if c := &a.renderCache.status; !c.hit(a.statusbar.Version(), statusWidth, 1, themeVer) {
-		railSpacer := lipgloss.NewStyle().
-			Width(railWidth).
-			Background(styles.RailBackground).
-			Render("")
-		out := lipgloss.JoinHorizontal(lipgloss.Center, railSpacer, a.statusbar.View(statusWidth))
-		c.store(out, a.statusbar.Version(), statusWidth, 1, themeVer)
-	}
-	status := a.renderCache.status.output
-
+	status := a.renderStatusRow(railWidth, a.width-railWidth, themeVer)
 	screen := lipgloss.JoinVertical(lipgloss.Left, content, status)
 	screen = a.applyOverlays(screen)
 	v := tea.NewView(a.maybeWrapFinalScreen(screen))
