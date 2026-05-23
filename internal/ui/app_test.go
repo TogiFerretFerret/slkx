@@ -78,24 +78,24 @@ func TestTypingStateAddAndExpire(t *testing.T) {
 	app.activeChannelID = "C1"
 
 	// Simulate receiving a typing event
-	app.addTypingUser("C1", "U1")
+	app.typing.Add("C1", "U1")
 
-	users := app.getTypingUsers("C1")
+	users := app.typing.Users("C1")
 	if len(users) != 1 || users[0] != "U1" {
 		t.Errorf("expected [U1], got %v", users)
 	}
 
 	// Add another user
-	app.addTypingUser("C1", "U2")
-	users = app.getTypingUsers("C1")
+	app.typing.Add("C1", "U2")
+	users = app.typing.Users("C1")
 	if len(users) != 2 {
 		t.Errorf("expected 2 users, got %d", len(users))
 	}
 
 	// Expire all
-	app.expireTypingUsers()
+	app.typing.Expire()
 	// They shouldn't be expired yet (TTL is 5 seconds)
-	users = app.getTypingUsers("C1")
+	users = app.typing.Users("C1")
 	if len(users) != 2 {
 		t.Errorf("expected 2 users still active, got %d", len(users))
 	}
@@ -106,34 +106,32 @@ func TestTypingStateFiltersSelf(t *testing.T) {
 	app.activeChannelID = "C1"
 	app.currentUserID = "U1"
 
-	app.addTypingUser("C1", "U1")
-	app.addTypingUser("C1", "U2")
+	app.typing.Add("C1", "U1")
+	app.typing.Add("C1", "U2")
 
-	users := app.getTypingUsersFiltered("C1")
+	users := app.typing.UsersExcluding("C1", app.currentUserID)
 	if len(users) != 1 || users[0] != "U2" {
 		t.Errorf("expected [U2] (self filtered), got %v", users)
 	}
 }
 
 func TestTypingIndicatorText(t *testing.T) {
-	app := NewApp()
-
-	text := app.typingIndicatorText(nil)
+	text := typingIndicatorText(nil)
 	if text != "" {
 		t.Errorf("expected empty for nil, got %q", text)
 	}
 
-	text = app.typingIndicatorText([]string{"Alice"})
+	text = typingIndicatorText([]string{"Alice"})
 	if text != "Alice is typing..." {
 		t.Errorf("expected 'Alice is typing...', got %q", text)
 	}
 
-	text = app.typingIndicatorText([]string{"Alice", "Bob"})
+	text = typingIndicatorText([]string{"Alice", "Bob"})
 	if text != "Alice and Bob are typing..." {
 		t.Errorf("expected 'Alice and Bob are typing...', got %q", text)
 	}
 
-	text = app.typingIndicatorText([]string{"Alice", "Bob", "Charlie"})
+	text = typingIndicatorText([]string{"Alice", "Bob", "Charlie"})
 	if text != "Several people are typing..." {
 		t.Errorf("expected 'Several people are typing...', got %q", text)
 	}
@@ -142,7 +140,7 @@ func TestTypingIndicatorText(t *testing.T) {
 func TestRenderTypingIndicator(t *testing.T) {
 	app := NewApp()
 	app.activeChannelID = "C1"
-	app.typingEnabled = true
+	app.typing.SetEnabled(true)
 	app.currentUserID = "U_SELF"
 
 	// Set up user names
@@ -155,7 +153,7 @@ func TestRenderTypingIndicator(t *testing.T) {
 	}
 
 	// One person typing
-	app.addTypingUser("C1", "U1")
+	app.typing.Add("C1", "U1")
 	line = app.renderTypingLine()
 	if line == "" {
 		t.Error("expected typing indicator, got empty")
@@ -182,24 +180,24 @@ func TestAppModeTransitions(t *testing.T) {
 
 func TestTypingClearedOnChannelSwitch(t *testing.T) {
 	app := NewApp()
-	app.typingEnabled = true
+	app.typing.SetEnabled(true)
 	app.activeChannelID = "C1"
 
-	app.addTypingUser("C1", "U1")
-	app.addTypingUser("C2", "U2")
+	app.typing.Add("C1", "U1")
+	app.typing.Add("C2", "U2")
 
 	// Typing indicator should show for C1
-	users := app.getTypingUsersFiltered("C1")
+	users := app.typing.UsersExcluding("C1", app.currentUserID)
 	if len(users) != 1 {
 		t.Errorf("expected 1 user typing in C1, got %d", len(users))
 	}
 
 	// After "switching" to C2, reset throttle
 	app.activeChannelID = "C2"
-	app.lastTypingSent = time.Time{} // reset throttle on switch
+	app.typingOut.lastSent = time.Time{} // reset throttle on switch
 
 	// C2 should show its typers
-	users = app.getTypingUsersFiltered("C2")
+	users = app.typing.UsersExcluding("C2", app.currentUserID)
 	if len(users) != 1 {
 		t.Errorf("expected 1 user typing in C2, got %d", len(users))
 	}
@@ -207,25 +205,25 @@ func TestTypingClearedOnChannelSwitch(t *testing.T) {
 
 func TestTypingThrottle(t *testing.T) {
 	app := NewApp()
-	app.typingEnabled = true
+	app.typing.SetEnabled(true)
 	app.activeChannelID = "C1"
 
 	// First call should allow sending
-	if !app.shouldSendTyping() {
+	if !app.typingOut.CanSend() {
 		t.Error("expected first typing send to be allowed")
 	}
 
 	// Mark as just sent
-	app.lastTypingSent = time.Now()
+	app.typingOut.lastSent = time.Now()
 
 	// Immediate second call should be throttled
-	if app.shouldSendTyping() {
+	if app.typingOut.CanSend() {
 		t.Error("expected typing send to be throttled")
 	}
 
 	// After 3 seconds, should allow again
-	app.lastTypingSent = time.Now().Add(-4 * time.Second)
-	if !app.shouldSendTyping() {
+	app.typingOut.lastSent = time.Now().Add(-4 * time.Second)
+	if !app.typingOut.CanSend() {
 		t.Error("expected typing send to be allowed after 3s")
 	}
 }

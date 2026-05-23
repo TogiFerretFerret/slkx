@@ -338,19 +338,16 @@ type App struct {
 	setStatusFn       func(action presencemenu.Action, snoozeMinutes int) // callback for API call
 	dndTickerOn       bool                                                // guards against parallel DNDTickMsg chains
 
-	// Typing indicators
-	typingUsers    map[string]map[string]time.Time // channelID -> userID -> expiresAt
-	typingTickerOn bool
-	typingEnabled  bool
+	// typing owns both inbound typing-indicator state (other users
+	// typing in channels) and outbound typing-send throttle. See
+	// internal/ui/typing.go.
+	typing    *typingTracker
+	typingOut *typingBroadcaster
 
 	// mouseWheelLines is the number of lines the viewport scrolls per
 	// mouse-wheel notch. Plumbed from [appearance].mouse_wheel_lines.
 	// Falls back to 3 when unset (matches the pre-config behavior).
 	mouseWheelLines int
-
-	// Outbound typing
-	typingSendFn   TypingSendFunc
-	lastTypingSent time.Time
 
 	// selfSend tracks slk-originated message sends so WS echoes can
 	// be suppressed (preventing the visible flicker between Slack's
@@ -438,7 +435,6 @@ func NewApp() *App {
 		sidebarVisible:       true,
 		view:                 ViewChannels,
 		keys:                 DefaultKeyMap(),
-		typingUsers:          make(map[string]map[string]time.Time),
 		selfSend:             newSelfSendDedup(),
 		bootstrap:            newWorkspaceBootstrap(),
 		threadsDirtyDebounce: 150 * time.Millisecond,
@@ -450,6 +446,11 @@ func NewApp() *App {
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
 	}
+	// typing tracker is referenced by typingOut so it must exist first;
+	// construct outside the literal because struct literals can't
+	// reference sibling fields.
+	app.typing = newTypingTracker()
+	app.typingOut = newTypingBroadcaster(app.typing)
 	// Seed the picker with built-in emojis so the autocomplete works even
 	// before the first workspace finishes loading customs.
 	app.compose.SetEmojiEntries(emoji.BuildEntries(nil))
@@ -997,7 +998,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// having to Tab/h-l out of the sidebar after picking a channel.
 		a.focusedPanel = PanelMessages
 		a.activeChannelID = msg.ID
-		a.lastTypingSent = time.Time{} // reset typing throttle for new channel
+		a.typingOut.ResetThrottle() // reset typing throttle for new channel
 		// Update local finder ordering immediately so the next Ctrl+T
 		// sees this channel at the top of the recents.
 		now := time.Now().Unix()
@@ -2037,12 +2038,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.bootstrap.MarkFailed(msg.TeamName)
 
 	case UserTypingMsg:
-		if !a.typingEnabled {
+		if !a.typing.Enabled() {
 			return a, nil
 		}
-		a.addTypingUser(msg.ChannelID, msg.UserID)
-		if !a.typingTickerOn {
-			a.typingTickerOn = true
+		a.typing.Add(msg.ChannelID, msg.UserID)
+		if !a.typing.TickerOn() {
+			a.typing.MarkTickerOn()
 			cmds = append(cmds, tea.Tick(time.Second, func(time.Time) tea.Msg {
 				return TypingExpiredMsg{}
 			}))
@@ -2105,11 +2106,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}))
 
 	case TypingExpiredMsg:
-		a.expireTypingUsers()
 		// Continue ticking if there are still active typers
-		hasTypers := len(a.typingUsers) > 0
-		a.typingTickerOn = hasTypers
-		if hasTypers {
+		if a.typing.Expire() {
 			cmds = append(cmds, tea.Tick(time.Second, func(time.Time) tea.Msg {
 				return TypingExpiredMsg{}
 			}))
@@ -2548,7 +2546,7 @@ func (a *App) handleInsertMode(msg tea.KeyMsg) tea.Cmd {
 		}
 		var cmd tea.Cmd
 		a.threadCompose, cmd = a.threadCompose.Update(msg)
-		a.maybeSendTyping()
+		a.typingOut.MaybeSend(a.threadPanel.ChannelID())
 		return cmd
 	}
 
@@ -2593,7 +2591,7 @@ func (a *App) handleInsertMode(msg tea.KeyMsg) tea.Cmd {
 
 	var cmd tea.Cmd
 	a.compose, cmd = a.compose.Update(msg)
-	a.maybeSendTyping()
+	a.typingOut.MaybeSend(a.activeChannelID)
 	return cmd
 }
 
@@ -4312,7 +4310,7 @@ func (a *App) SetThemeOverrides(overrides config.Theme) {
 
 // SetTypingEnabled controls whether typing indicators are shown and sent.
 func (a *App) SetTypingEnabled(enabled bool) {
-	a.typingEnabled = enabled
+	a.typing.SetEnabled(enabled)
 }
 
 // SetMouseWheelLines configures the number of lines the viewport scrolls per
@@ -4333,7 +4331,7 @@ func (a *App) SetSidebarStaleThreshold(d time.Duration) {
 
 // SetTypingSender sets the callback for sending typing indicators.
 func (a *App) SetTypingSender(fn TypingSendFunc) {
-	a.typingSendFn = fn
+	a.typingOut.SetSender(fn)
 }
 
 // SetChannelJoiner sets the callback for joining a channel via the Slack API.
@@ -4341,89 +4339,18 @@ func (a *App) SetChannelJoiner(fn JoinChannelFunc) {
 	a.channelJoiner = fn
 }
 
-// shouldSendTyping returns true if enough time has passed since the last typing send.
-func (a *App) shouldSendTyping() bool {
-	if !a.typingEnabled {
-		return false
-	}
-	return time.Since(a.lastTypingSent) >= 3*time.Second
-}
-
-// maybeSendTyping sends a typing indicator if the throttle allows it.
-func (a *App) maybeSendTyping() {
-	if a.typingSendFn == nil || !a.shouldSendTyping() {
-		return
-	}
-	a.lastTypingSent = time.Now()
-	channelID := a.activeChannelID
-	if a.focusedPanel == PanelThread && a.threadVisible {
-		channelID = a.threadPanel.ChannelID()
-	}
-	go a.typingSendFn(channelID)
-}
-
-// addTypingUser records that a user is typing in a channel.
-func (a *App) addTypingUser(channelID, userID string) {
-	if a.typingUsers[channelID] == nil {
-		a.typingUsers[channelID] = make(map[string]time.Time)
-	}
-	a.typingUsers[channelID][userID] = time.Now().Add(5 * time.Second)
-}
-
-// expireTypingUsers removes expired typing entries.
-func (a *App) expireTypingUsers() {
-	now := time.Now()
-	for ch, users := range a.typingUsers {
-		for uid, expires := range users {
-			if now.After(expires) {
-				delete(users, uid)
-			}
-		}
-		if len(users) == 0 {
-			delete(a.typingUsers, ch)
-		}
-	}
-}
-
-// getTypingUsers returns user IDs currently typing in the given channel.
-func (a *App) getTypingUsers(channelID string) []string {
-	users := a.typingUsers[channelID]
-	if len(users) == 0 {
-		return nil
-	}
-	now := time.Now()
-	var result []string
-	for uid, expires := range users {
-		if now.Before(expires) {
-			result = append(result, uid)
-		}
-	}
-	return result
-}
-
-// getTypingUsersFiltered returns typing user IDs excluding the current user.
-func (a *App) getTypingUsersFiltered(channelID string) []string {
-	all := a.getTypingUsers(channelID)
-	var filtered []string
-	for _, uid := range all {
-		if uid != a.currentUserID {
-			filtered = append(filtered, uid)
-		}
-	}
-	return filtered
-}
-
-// renderTypingLine returns the styled typing indicator for the current channel,
-// or an empty string if no one is typing.
+// renderTypingLine returns the styled typing indicator for the current
+// channel, or an empty string if no one is typing. Stays on App because
+// it pulls in messagepane name resolution and styles. State and
+// formatting live in internal/ui/typing.go.
 func (a *App) renderTypingLine() string {
-	if !a.typingEnabled {
+	if !a.typing.Enabled() {
 		return ""
 	}
-	userIDs := a.getTypingUsersFiltered(a.activeChannelID)
+	userIDs := a.typing.UsersExcluding(a.activeChannelID, a.currentUserID)
 	if len(userIDs) == 0 {
 		return ""
 	}
-
 	// Resolve user IDs to display names
 	names := make([]string, 0, len(userIDs))
 	for _, uid := range userIDs {
@@ -4433,23 +4360,7 @@ func (a *App) renderTypingLine() string {
 		}
 		names = append(names, name)
 	}
-
-	text := a.typingIndicatorText(names)
-	return styles.TypingIndicator.Render(text)
-}
-
-// typingIndicatorText formats the typing indicator string from display names.
-func (a *App) typingIndicatorText(names []string) string {
-	switch len(names) {
-	case 0:
-		return ""
-	case 1:
-		return names[0] + " is typing..."
-	case 2:
-		return names[0] + " and " + names[1] + " are typing..."
-	default:
-		return "Several people are typing..."
-	}
+	return styles.TypingIndicator.Render(typingIndicatorText(names))
 }
 
 func (a *App) View() tea.View {

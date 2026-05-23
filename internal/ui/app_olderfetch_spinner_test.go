@@ -68,7 +68,7 @@ func TestScrollFocusedPanel_BackfillAtViewportTop(t *testing.T) {
 	app.activeChannelID = "C1"
 	app.focusedPanel = PanelMessages
 	app.view = ViewChannels
-	app.loading = false
+	app.bootstrap.loading = false
 	app.fetchingOlder = false
 	app.layoutMsgHeight = 20
 
