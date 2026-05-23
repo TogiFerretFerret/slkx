@@ -104,15 +104,10 @@ type App struct {
 	height         int
 	keys           KeyMap
 
-	// Cached layout widths for mouse hit-testing
-	layoutRailWidth    int
-	layoutSidebarEnd   int // railWidth + sidebarWidth + sidebarBorder
-	layoutMsgEnd       int // layoutSidebarEnd + msgWidth + msgBorder
-	layoutThreadEnd    int // layoutMsgEnd + threadWidth + threadBorder
-	// Cached pane content heights, used for page-up/down distance calculations.
-	layoutMsgHeight     int
-	layoutSidebarHeight int
-	layoutThreadHeight  int
+	// layout owns the per-frame layout geometry (horizontal bands for
+	// mouse hit-testing + per-pane content heights for pageSize). See
+	// internal/ui/panellayout.go.
+	layout *panelLayout
 
 	// renderCache aggregates the six per-panel render caches. See
 	// internal/ui/panelcache.go.
@@ -343,6 +338,7 @@ func NewApp() *App {
 		renderCache:          newPanelRenderCache(),
 		drag:                 newDragState(),
 		preview:              newImagePreviewController(),
+		layout:               newPanelLayout(),
 		lastChannelByTeam:    map[string]string{},
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
@@ -468,15 +464,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		x := msg.X
 		switch {
-		case x < a.layoutRailWidth:
+		case x < a.layout.RailWidth():
 			// Workspace rail: no scroll here.
-		case a.sidebarVisible && x < a.layoutSidebarEnd:
+		case a.sidebarVisible && x < a.layout.SidebarEnd():
 			if up {
 				a.sidebar.ScrollUp(wheelLinesPerNotch)
 			} else {
 				a.sidebar.ScrollDown(wheelLinesPerNotch)
 			}
-		case x < a.layoutMsgEnd:
+		case x < a.layout.MsgEnd():
 			if a.view == ViewThreads {
 				if up {
 					a.threadsView.ScrollUp(wheelLinesPerNotch)
@@ -497,7 +493,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.messagepane.ScrollDown(wheelLinesPerNotch)
 				}
 			}
-		case a.threadVisible && x < a.layoutThreadEnd:
+		case a.threadVisible && x < a.layout.ThreadEnd():
 			if up {
 				a.threadPanel.ScrollUp(wheelLinesPerNotch)
 			} else {
@@ -519,7 +515,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Determine which panel was clicked
-		if x < a.layoutRailWidth {
+		if x < a.layout.RailWidth() {
 			// Workspace rail: clicking a workspace tile switches to
 			// that workspace (same code path as the 1-9 keybinds and
 			// the workspace finder). The rail has no border above, so
@@ -533,7 +529,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		} else if a.sidebarVisible && x < a.layoutSidebarEnd {
+		} else if a.sidebarVisible && x < a.layout.SidebarEnd() {
 			a.focusedPanel = PanelSidebar
 			sidebarY := msg.Y - 1 // account for top border
 			if sidebarY >= 0 {
@@ -549,7 +545,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return a, func() tea.Msg { return ThreadsViewActivatedMsg{} }
 				}
 			}
-		} else if x < a.layoutMsgEnd {
+		} else if x < a.layout.MsgEnd() {
 			a.focusedPanel = PanelMessages
 			// In the threads-list view, the messages-pane region
 			// renders threadsView, not the channel messages. Route
@@ -610,7 +606,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// pressing Enter on the selected message).
 				a.drag.SetClickedMessage(a.messagepane.ClickAt(py))
 			}
-		} else if a.threadVisible && x < a.layoutThreadEnd {
+		} else if a.threadVisible && x < a.layout.ThreadEnd() {
 			a.focusedPanel = PanelThread
 			panel, px, py, ok := a.panelAt(msg.X, msg.Y)
 			if ok && panel == PanelThread && py >= 0 {
@@ -3063,15 +3059,7 @@ func (a *App) handleGoToBottom() tea.Cmd {
 // currently-focused panel. Falls back to a sensible default if the layout
 // hasn't been measured yet (i.e. before the first render).
 func (a *App) pageSize() int {
-	var h int
-	switch a.focusedPanel {
-	case PanelSidebar:
-		h = a.layoutSidebarHeight
-	case PanelMessages:
-		h = a.layoutMsgHeight
-	case PanelThread:
-		h = a.layoutThreadHeight
-	}
+	h := a.layout.PageHeight(a.focusedPanel)
 	if h < 4 {
 		h = 4
 	}
@@ -3088,28 +3076,10 @@ func (a *App) halfPageSize() int {
 	return n
 }
 
-// panelAt classifies the (x, y) coordinate into the panel under the
-// cursor and returns pane-local content coordinates (after subtracting
-// layout offsets and the 1-row top border). ok=false means the cursor
-// is outside the messages/thread panes (status bar, sidebar, rail —
-// drag selection is not supported there).
+// panelAt is a thin wrapper around panelLayout.PanelAt that forwards
+// the App's current height + visibility flags.
 func (a *App) panelAt(x, y int) (panel Panel, paneX, paneY int, ok bool) {
-	if y >= a.height-1 {
-		return PanelWorkspace, 0, 0, false // status bar
-	}
-	switch {
-	case x < a.layoutRailWidth:
-		return PanelWorkspace, 0, 0, false
-	case a.sidebarVisible && x < a.layoutSidebarEnd:
-		return PanelSidebar, 0, 0, false
-	case x < a.layoutMsgEnd:
-		// Messages pane content: subtract the message-pane left edge
-		// (after sidebar) and account for the panel's top border (1 row).
-		return PanelMessages, x - a.layoutSidebarEnd - 1, y - 1, true
-	case a.threadVisible && x < a.layoutThreadEnd:
-		return PanelThread, x - a.layoutMsgEnd - 1, y - 1, true
-	}
-	return PanelWorkspace, 0, 0, false
+	return a.layout.PanelAt(x, y, a.height, a.sidebarVisible, a.threadVisible)
 }
 
 // scrollFocusedPanel scrolls the focused panel by delta lines (negative = up)
@@ -4224,56 +4194,25 @@ func (a *App) View() tea.View {
 		return v
 	}
 
-	statusHeight := 1
-	contentHeight := a.height - statusHeight
-
-	// Calculate widths, accounting for borders (2 cols each for left+right)
-	railWidth := a.workspaceRail.Width()
-	sidebarWidth := 0
-	sidebarBorder := 0
-	if a.sidebarVisible {
-		sidebarWidth = a.sidebar.Width()
-		sidebarBorder = 2 // left + right border
-	}
-
-	// Calculate the message area (everything right of sidebar)
-	msgAreaWidth := a.width - railWidth - sidebarWidth - sidebarBorder
-
-	// Determine thread and message pane widths
-	msgBorder := 2
-	threadWidth := 0
-	threadBorder := 0
-	if a.threadVisible {
-		threadBorder = 2
-		// 35% of message area for thread, but enforce minimums
-		threadWidth = msgAreaWidth * 35 / 100
-		msgPaneWidth := msgAreaWidth - threadWidth - msgBorder - threadBorder
-		// Enforce minimum widths
-		if msgPaneWidth < 40 || threadWidth < 30 {
-			// Too narrow -- auto-hide thread
-			a.threadVisible = false
-			threadWidth = 0
-			threadBorder = 0
-			if a.focusedPanel == PanelThread {
-				a.focusedPanel = PanelMessages
-			}
+	// Resolve per-pane widths/borders. Compute stores horizontal bands
+	// for subsequent mouse hit-testing (panelAt) and surfaces a
+	// ThreadAutoHidden flag when the available width can't fit the
+	// thread pane at its minimum.
+	frame := a.layout.Compute(a.width, a.height, a.workspaceRail.Width(), a.sidebar.Width(), a.sidebarVisible, a.threadVisible)
+	if frame.ThreadAutoHidden {
+		a.threadVisible = false
+		if a.focusedPanel == PanelThread {
+			a.focusedPanel = PanelMessages
 		}
 	}
-
-	msgWidth := msgAreaWidth - msgBorder - threadWidth - threadBorder
-	if msgWidth < 10 {
-		msgWidth = 10
-	}
-
-	// Store layout widths for mouse hit-testing in Update()
-	a.layoutRailWidth = railWidth
-	a.layoutSidebarEnd = railWidth + sidebarWidth + sidebarBorder
-	a.layoutMsgEnd = a.layoutSidebarEnd + msgWidth + msgBorder
-	if a.threadVisible && threadWidth > 0 {
-		a.layoutThreadEnd = a.layoutMsgEnd + threadWidth + threadBorder
-	} else {
-		a.layoutThreadEnd = a.layoutMsgEnd
-	}
+	contentHeight := frame.ContentHeight
+	railWidth := frame.RailWidth
+	sidebarWidth := frame.SidebarWidth
+	sidebarBorder := frame.SidebarBorder
+	msgWidth := frame.MsgWidth
+	msgBorder := frame.MsgBorder
+	threadWidth := frame.ThreadWidth
+	threadBorder := frame.ThreadBorder
 
 	// Helper to force a panel to an exact width and height with a given
 	// background color. Uses an explicit width parameter instead of
@@ -4332,7 +4271,7 @@ func (a *App) View() tea.View {
 			c.store(out, a.sidebar.Version(), sidebarWidth, contentHeight, sbLayoutKey)
 		}
 		panels = append(panels, a.renderCache.sidebar.output)
-		a.layoutSidebarHeight = contentHeight - 2
+		a.layout.SetSidebarHeight(contentHeight - 2)
 	}
 
 	// If the full-screen image preview is open, render a single panel
@@ -4400,7 +4339,7 @@ func (a *App) View() tea.View {
 				msgBorderStyle = styles.FocusedBorder.Width(msgWidth)
 			}
 			msgContentHeight := contentHeight - 2
-			a.layoutMsgHeight = msgContentHeight
+			a.layout.SetMsgHeight(msgContentHeight)
 			if msgContentHeight < 3 {
 				msgContentHeight = 3
 			}
@@ -4447,7 +4386,7 @@ func (a *App) View() tea.View {
 		typingHeight := 1
 		bottomHeight := composeHeight + typingHeight
 		msgContentHeight := contentHeight - 2 - bottomHeight
-		a.layoutMsgHeight = msgContentHeight
+		a.layout.SetMsgHeight(msgContentHeight)
 		if msgContentHeight < 3 {
 			msgContentHeight = 3
 		}
@@ -4525,7 +4464,7 @@ func (a *App) View() tea.View {
 		threadComposeView = threadComposeSpacer + "\n" + threadComposeView
 		threadComposeHeight := lipgloss.Height(threadComposeView)
 		threadContentHeight := contentHeight - 2 - threadComposeHeight
-		a.layoutThreadHeight = threadContentHeight
+		a.layout.SetThreadHeight(threadContentHeight)
 		if threadContentHeight < 3 {
 			threadContentHeight = 3
 		}

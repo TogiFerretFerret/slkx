@@ -22,8 +22,8 @@ func TestApp_ClickOnWorkspaceRailSwitches(t *testing.T) {
 	})
 	// Force layout so layoutRailWidth populates.
 	_ = a.View()
-	if a.layoutRailWidth <= 0 {
-		t.Fatalf("layoutRailWidth should be populated after View(); got %d", a.layoutRailWidth)
+	if a.layout.railWidth <= 0 {
+		t.Fatalf("layoutRailWidth should be populated after View(); got %d", a.layout.railWidth)
 	}
 	// Workspace 0 is selected by default; we expect a click on
 	// workspace 1 (tile at Y=3) to trigger the switcher.

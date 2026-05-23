@@ -70,7 +70,7 @@ func TestScrollFocusedPanel_BackfillAtViewportTop(t *testing.T) {
 	app.view = ViewChannels
 	app.bootstrap.loading = false
 	app.fetchingOlder = false
-	app.layoutMsgHeight = 20
+	app.layout.msgHeight = 20
 
 	app.messagepane.SetMessages([]messages.MessageItem{
 		{TS: "1.0", UserName: "alice", Text: "first"},

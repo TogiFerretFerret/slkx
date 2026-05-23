@@ -5,16 +5,17 @@
 // paneY, ok) mapping so the upcoming panelLayout extraction can't
 // silently shift hit-test boundaries.
 //
-// Geometry recap (from app.go:View): layoutRailWidth | sidebar |
-// messages | thread | (status row at y == height-1).
+// Geometry recap (matches panelLayout.PanelAt in panellayout.go):
+// rail | sidebar | messages | thread, with the 1-row status bar at
+// y == height-1.
 //
-//   x < layoutRailWidth                                    → PanelWorkspace, ok=false
-//   sidebarVisible && x < layoutSidebarEnd                 → PanelSidebar, ok=false
-//   x < layoutMsgEnd                                       → PanelMessages
-//                                                            paneX = x - layoutSidebarEnd - 1
+//   x < layout.railWidth                                   → PanelWorkspace, ok=false
+//   sidebarVisible && x < layout.sidebarEnd                → PanelSidebar, ok=false
+//   x < layout.msgEnd                                      → PanelMessages
+//                                                            paneX = x - layout.sidebarEnd - 1
 //                                                            paneY = y - 1, ok=true
-//   threadVisible && x < layoutThreadEnd                   → PanelThread
-//                                                            paneX = x - layoutMsgEnd - 1
+//   threadVisible && x < layout.threadEnd                  → PanelThread
+//                                                            paneX = x - layout.msgEnd - 1
 //                                                            paneY = y - 1, ok=true
 //   y >= height-1                                          → PanelWorkspace, ok=false
 package ui
@@ -33,10 +34,10 @@ func newPanelAtApp() *App {
 	a.height = 24
 	a.sidebarVisible = true
 	a.threadVisible = true
-	a.layoutRailWidth = 3
-	a.layoutSidebarEnd = 25
-	a.layoutMsgEnd = 77
-	a.layoutThreadEnd = 104
+	a.layout.railWidth = 3
+	a.layout.sidebarEnd = 25
+	a.layout.msgEnd = 77
+	a.layout.threadEnd = 104
 	return a
 }
 
@@ -172,10 +173,10 @@ func TestPanelAtBoundaryBetweenSidebarAndMessages(t *testing.T) {
 	a := newPanelAtApp()
 	// layoutSidebarEnd is the FIRST x belonging to the messages band.
 	// x=layoutSidebarEnd-1 is the LAST sidebar column.
-	if _, _, _, ok := a.panelAt(a.layoutSidebarEnd-1, 5); ok {
+	if _, _, _, ok := a.panelAt(a.layout.sidebarEnd-1, 5); ok {
 		t.Error("x=sidebarEnd-1 should still be the sidebar (ok=false)")
 	}
-	panel, _, _, ok := a.panelAt(a.layoutSidebarEnd, 5)
+	panel, _, _, ok := a.panelAt(a.layout.sidebarEnd, 5)
 	if !ok || panel != PanelMessages {
 		t.Errorf("x=sidebarEnd: want messages/ok, got panel=%v ok=%v", panel, ok)
 	}
@@ -184,12 +185,12 @@ func TestPanelAtBoundaryBetweenSidebarAndMessages(t *testing.T) {
 func TestPanelAtBoundaryBetweenMessagesAndThread(t *testing.T) {
 	a := newPanelAtApp()
 	// Last messages column.
-	panel, _, _, ok := a.panelAt(a.layoutMsgEnd-1, 5)
+	panel, _, _, ok := a.panelAt(a.layout.msgEnd-1, 5)
 	if !ok || panel != PanelMessages {
 		t.Errorf("x=msgEnd-1: want messages/ok, got panel=%v ok=%v", panel, ok)
 	}
 	// First thread column.
-	panel, _, _, ok = a.panelAt(a.layoutMsgEnd, 5)
+	panel, _, _, ok = a.panelAt(a.layout.msgEnd, 5)
 	if !ok || panel != PanelThread {
 		t.Errorf("x=msgEnd: want thread/ok, got panel=%v ok=%v", panel, ok)
 	}

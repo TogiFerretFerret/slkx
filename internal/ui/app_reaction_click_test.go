@@ -21,12 +21,12 @@ func findMessagepaneReactionHit(t *testing.T, a *App) (x, y int, emoji string) {
 	// "small" since pills sit on a line below the body text — scanning
 	// up to height-1 covers any reasonable layout.
 	maxPaneY := a.height - 2 // minus top border and status bar
-	maxPaneX := a.layoutMsgEnd - a.layoutSidebarEnd - 2
+	maxPaneX := a.layout.msgEnd - a.layout.sidebarEnd - 2
 	for paneY := chrome; paneY < maxPaneY; paneY++ {
 		contentY := paneY - chrome
 		for paneX := 0; paneX < maxPaneX; paneX++ {
 			if _, e, ok := a.messagepane.HitTestReaction(contentY, paneX); ok {
-				return a.layoutSidebarEnd + 1 + paneX, paneY + 1, e
+				return a.layout.sidebarEnd + 1 + paneX, paneY + 1, e
 			}
 		}
 	}

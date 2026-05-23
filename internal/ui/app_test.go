@@ -737,9 +737,9 @@ func TestApp_ClickOnThreadInThreadsViewOpensIt(t *testing.T) {
 	a.activeTeamID = "T1"
 	// Force layout to populate layoutSidebarEnd / layoutMsgEnd.
 	_ = a.View()
-	if a.layoutMsgEnd <= a.layoutSidebarEnd {
+	if a.layout.msgEnd <= a.layout.sidebarEnd {
 		t.Fatalf("layout not populated after View(); sidebarEnd=%d msgEnd=%d",
-			a.layoutSidebarEnd, a.layoutMsgEnd)
+			a.layout.sidebarEnd, a.layout.msgEnd)
 	}
 
 	fetchedCh := ""
@@ -770,7 +770,7 @@ func TestApp_ClickOnThreadInThreadsViewOpensIt(t *testing.T) {
 	// cardStride=4 and cardContentLines=3, absLine=4 lies on the
 	// first row of card 1 (rows 0-2 = card 0, row 3 = separator,
 	// rows 4-6 = card 1).
-	clickX := a.layoutSidebarEnd + 5 // anywhere inside the msg pane zone
+	clickX := a.layout.sidebarEnd + 5 // anywhere inside the msg pane zone
 	clickY := 5
 	fetchedCh, fetchedTS = "", ""
 	_, cmd := a.Update(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
@@ -1399,7 +1399,7 @@ func TestApp_HalfPageScrollMovesViewportNotSelection(t *testing.T) {
 	}
 	app.messagepane.SetMessages(items)
 	// Provide a sane layout so halfPageSize() returns > 1.
-	app.layoutMsgHeight = 20
+	app.layout.msgHeight = 20
 	// Force one render so yOffset snaps to keep the bottom selection visible
 	// (SetMessages defaults selection to the last message). Without this,
 	// yOffset is still 0 and ScrollUp would clamp with no observable effect.

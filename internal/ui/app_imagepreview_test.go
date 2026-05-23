@@ -170,7 +170,7 @@ func TestMouseClick_OnImageDispatchesOpenPreview(t *testing.T) {
 	//   X_terminal = layoutSidebarEnd + 1 (border) + paneCol
 	//   Y_terminal = 1 (border) + chromeHeight + contentRow
 	chrome := app.messagepane.ChromeHeight()
-	x := app.layoutSidebarEnd + 1 + colMid
+	x := app.layout.sidebarEnd + 1 + colMid
 	y := 1 + chrome + rowMid
 
 	_, cmd := app.Update(tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft})
