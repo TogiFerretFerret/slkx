@@ -1806,24 +1806,7 @@ func (a *App) renderTypingLine() string {
 }
 
 func (a *App) View() tea.View {
-	// Before the terminal reports its size, we can't lay out the
-	// real three-panel UI. Render the loading overlay (or a minimal
-	// "Initializing..." fallback) using a sane default canvas so the
-	// user sees something immediately instead of a blank altscreen
-	// while workspaces connect.
-	if a.width == 0 || a.height == 0 {
-		var screen string
-		if a.bootstrap.IsLoading() {
-			// Use a generous default canvas so the centered overlay
-			// lands roughly where the user's eye expects it. The
-			// real WindowSizeMsg arrives within a frame and the
-			// overlay re-renders correctly.
-			screen = a.bootstrap.Render(80, 24, a.spinnerGlyph())
-		} else {
-			screen = "Initializing..."
-		}
-		v := tea.NewView(screen)
-		v.AltScreen = true
+	if v, handled := a.renderEarlyFallback(); handled {
 		return v
 	}
 
