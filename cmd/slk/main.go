@@ -1120,25 +1120,27 @@ func run() error {
 		})
 
 		app.SetThreadService(ui.NewThreadService(ui.ThreadServiceFuncs{
-			Fetch: func(channelID, threadTS string) tea.Msg {
+			Fetch: func(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg {
+				chIDStr, threadTSStr := string(channelID), string(threadTS)
 				wctx := router.Active()
 				if wctx == nil {
 					return nil
 				}
-				replies := fetchThreadReplies(wctx.Client, channelID, threadTS, db, wctx.UserNames, tsFormat, avatarCache, router)
+				replies := fetchThreadReplies(wctx.Client, chIDStr, threadTSStr, db, wctx.UserNames, tsFormat, avatarCache, router)
 				return ui.ThreadRepliesLoadedMsg{
-					ThreadTS: threadTS,
+					ThreadTS: threadTSStr,
 					Replies:  replies,
 				}
 			},
-			CacheRead: func(channelID, threadTS string) []messages.MessageItem {
+			CacheRead: func(channelID ids.ChannelID, threadTS ids.ThreadTS) []messages.MessageItem {
 				wctx := router.Active()
 				if wctx == nil {
 					return nil
 				}
-				return loadCachedThreadReplies(db, wctx.Client.UserID(), channelID, threadTS, wctx.UserNames, tsFormat, router)
+				return loadCachedThreadReplies(db, wctx.Client.UserID(), string(channelID), string(threadTS), wctx.UserNames, tsFormat, router)
 			},
-			Mark: func(channelID, threadTS, ts string) {
+			Mark: func(channelID ids.ChannelID, threadTS ids.ThreadTS, ts ids.MessageTS) {
+				chIDStr, threadTSStr, tsStr := string(channelID), string(threadTS), string(ts)
 				wctx := router.Active()
 				if wctx == nil {
 					return
@@ -1147,51 +1149,53 @@ func run() error {
 				go func() {
 					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancel()
-					if err := client.MarkThread(ctx, channelID, threadTS, ts); err != nil {
-						log.Printf("Warning: MarkThread(%s, %s): %v", channelID, threadTS, err)
+					if err := client.MarkThread(ctx, chIDStr, threadTSStr, tsStr); err != nil {
+						log.Printf("Warning: MarkThread(%s, %s): %v", chIDStr, threadTSStr, err)
 					}
 				}()
 			},
-			SendReply: func(channelID, threadTS, text string) tea.Msg {
+			SendReply: func(channelID ids.ChannelID, threadTS ids.ThreadTS, text string) tea.Msg {
+				chIDStr, threadTSStr := string(channelID), string(threadTS)
 				wctx := router.Active()
 				if wctx == nil {
-					return ui.ThreadReplySendFailedMsg{ChannelID: channelID, ThreadTS: threadTS, Reason: "no active workspace"}
+					return ui.ThreadReplySendFailedMsg{ChannelID: chIDStr, ThreadTS: threadTSStr, Reason: "no active workspace"}
 				}
 				client := wctx.Client
 				userNames := wctx.UserNames
 				ctx := context.Background()
-				ts, sentMrkdwn, err := client.SendReply(ctx, channelID, threadTS, text)
+				ts, sentMrkdwn, err := client.SendReply(ctx, chIDStr, threadTSStr, text)
 				if err != nil {
 					log.Printf("Warning: failed to send thread reply: %v", err)
-					return ui.ThreadReplySendFailedMsg{ChannelID: channelID, ThreadTS: threadTS, Reason: err.Error()}
+					return ui.ThreadReplySendFailedMsg{ChannelID: chIDStr, ThreadTS: threadTSStr, Reason: err.Error()}
 				}
 				userName := "you"
 				if resolved, ok := userNames[client.UserID()]; ok {
 					userName = resolved
 				}
 				return ui.ThreadReplySentMsg{
-					ChannelID: channelID,
-					ThreadTS:  threadTS,
+					ChannelID: chIDStr,
+					ThreadTS:  threadTSStr,
 					Message: messages.MessageItem{
 						TS:        ts,
 						UserID:    client.UserID(),
 						UserName:  userName,
 						Text:      sentMrkdwn,
 						Timestamp: formatTimestamp(ts, tsFormat),
-						ThreadTS:  threadTS,
+						ThreadTS:  threadTSStr,
 					},
 				}
 			},
-			ListFetch: func(teamID string) tea.Msg {
+			ListFetch: func(teamID ids.TeamID) tea.Msg {
+				teamIDStr := string(teamID)
 				wctx := router.Active()
 				if wctx == nil {
 					return nil
 				}
-				summaries, err := db.ListSubscribedThreads(teamID, wctx.Client.UserID())
+				summaries, err := db.ListSubscribedThreads(teamIDStr, wctx.Client.UserID())
 				if err != nil {
-					log.Printf("Warning: ListSubscribedThreads(%s): %v", teamID, err)
+					log.Printf("Warning: ListSubscribedThreads(%s): %v", teamIDStr, err)
 					return ui.ThreadsListLoadedMsg{
-						TeamID:                 teamID,
+						TeamID:                 teamIDStr,
 						Summaries:              nil,
 						SubscriptionsAvailable: wctx.SubscriptionsAvailable,
 					}
@@ -1201,19 +1205,20 @@ func run() error {
 				// suppression heuristic that protected against stale
 				// channels.last_read_ts is no longer needed.
 				return ui.ThreadsListLoadedMsg{
-					TeamID:                 teamID,
+					TeamID:                 teamIDStr,
 					Summaries:              summaries,
 					SubscriptionsAvailable: wctx.SubscriptionsAvailable,
 				}
 			},
-			ChannelLastRead: func(channelID string) string {
+			ChannelLastRead: func(channelID ids.ChannelID) string {
 				wctx := router.Active()
 				if wctx == nil {
 					return ""
 				}
-				state, err := db.GetChannelReadState(channelID)
+				chIDStr := string(channelID)
+				state, err := db.GetChannelReadState(chIDStr)
 				if err != nil {
-					log.Printf("Warning: GetChannelReadState for %s: %v", channelID, err)
+					log.Printf("Warning: GetChannelReadState for %s: %v", chIDStr, err)
 					return ""
 				}
 				return state.LastReadTS

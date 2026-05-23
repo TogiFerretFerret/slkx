@@ -745,10 +745,10 @@ func TestApp_ClickOnThreadInThreadsViewOpensIt(t *testing.T) {
 
 	fetchedCh := ""
 	fetchedTS := ""
-	a.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
-		fetchedCh = channelID
-		fetchedTS = threadTS
-		return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: nil}
+	a.setThreadFetcherForTest(func(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg {
+		fetchedCh = string(channelID)
+		fetchedTS = string(threadTS)
+		return ThreadRepliesLoadedMsg{ThreadTS: string(threadTS), Replies: nil}
 	})
 	summaries := []cache.ThreadSummary{
 		{ChannelID: "C_A", ThreadTS: "1.0", ParentTS: "1.0", ParentText: "alpha"},
@@ -807,10 +807,10 @@ func TestApp_HandleEnterInThreadsViewOpensSelectedThread(t *testing.T) {
 
 	fetchedCh := ""
 	fetchedTS := ""
-	app.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
-		fetchedCh = channelID
-		fetchedTS = threadTS
-		return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: nil}
+	app.setThreadFetcherForTest(func(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg {
+		fetchedCh = string(channelID)
+		fetchedTS = string(threadTS)
+		return ThreadRepliesLoadedMsg{ThreadTS: string(threadTS), Replies: nil}
 	})
 
 	// Seed the channel messages pane with a message highlighted at
@@ -871,9 +871,9 @@ func TestApp_OpenSelectedThreadDedups(t *testing.T) {
 	app := NewApp()
 	app.activeTeamID = "T1"
 	fetched := 0
-	app.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
+	app.setThreadFetcherForTest(func(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg {
 		fetched++
-		return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: nil}
+		return ThreadRepliesLoadedMsg{ThreadTS: string(threadTS), Replies: nil}
 	})
 	summaries := []cache.ThreadSummary{
 		{ChannelID: "C1", ThreadTS: "1.0"},
@@ -941,9 +941,9 @@ func TestApp_NewThreadReplyTriggersDirtyMsg(t *testing.T) {
 	app.threadsDirtyDebounce = 5 * time.Millisecond
 
 	fetched := make(chan string, 4)
-	app.setThreadsListFetcherForTest(func(teamID string) tea.Msg {
-		fetched <- teamID
-		return ThreadsListLoadedMsg{TeamID: teamID, Summaries: nil}
+	app.setThreadsListFetcherForTest(func(teamID ids.TeamID) tea.Msg {
+		fetched <- string(teamID)
+		return ThreadsListLoadedMsg{TeamID: string(teamID), Summaries: nil}
 	})
 
 	// Activate threads view; drain the resulting initial fetch so it
@@ -1008,9 +1008,9 @@ func TestApp_NewMessageWithoutThreadTSDoesNotTriggerDirty(t *testing.T) {
 	app.threadsDirtyDebounce = 5 * time.Millisecond
 
 	fetched := make(chan struct{}, 4)
-	app.setThreadsListFetcherForTest(func(teamID string) tea.Msg {
+	app.setThreadsListFetcherForTest(func(teamID ids.TeamID) tea.Msg {
 		fetched <- struct{}{}
-		return ThreadsListLoadedMsg{TeamID: teamID, Summaries: nil}
+		return ThreadsListLoadedMsg{TeamID: string(teamID), Summaries: nil}
 	})
 
 	// Top-level message (no ThreadTS) should NOT schedule any dirty fetch.
@@ -1044,9 +1044,9 @@ func TestApp_NewMessageWithoutThreadTSDoesNotTriggerDirty(t *testing.T) {
 func TestApp_WorkspaceReadyTriggersThreadsListFetch(t *testing.T) {
 	app := NewApp()
 	fetched := make(chan string, 1)
-	app.setThreadsListFetcherForTest(func(teamID string) tea.Msg {
-		fetched <- teamID
-		return ThreadsListLoadedMsg{TeamID: teamID, Summaries: nil}
+	app.setThreadsListFetcherForTest(func(teamID ids.TeamID) tea.Msg {
+		fetched <- string(teamID)
+		return ThreadsListLoadedMsg{TeamID: string(teamID), Summaries: nil}
 	})
 
 	_, cmd := app.Update(WorkspaceReadyMsg{
@@ -1101,8 +1101,8 @@ func TestApp_InsertInThreadsViewFocusesThreadCompose(t *testing.T) {
 
 func TestApp_BackgroundWorkspaceReadyDoesNotClobberActiveState(t *testing.T) {
 	app := NewApp()
-	app.setThreadsListFetcherForTest(func(teamID string) tea.Msg {
-		return ThreadsListLoadedMsg{TeamID: teamID, Summaries: nil}
+	app.setThreadsListFetcherForTest(func(teamID ids.TeamID) tea.Msg {
+		return ThreadsListLoadedMsg{TeamID: string(teamID), Summaries: nil}
 	})
 
 	// Make T1 the active workspace by sending the first WorkspaceReadyMsg.
@@ -1154,9 +1154,9 @@ func TestApp_WorkspaceSwitchedTriggersThreadsListFetchAndSelectsThreadsRow(t *te
 	}
 
 	fetched := make(chan string, 1)
-	app.setThreadsListFetcherForTest(func(teamID string) tea.Msg {
-		fetched <- teamID
-		return ThreadsListLoadedMsg{TeamID: teamID, Summaries: nil}
+	app.setThreadsListFetcherForTest(func(teamID ids.TeamID) tea.Msg {
+		fetched <- string(teamID)
+		return ThreadsListLoadedMsg{TeamID: string(teamID), Summaries: nil}
 	})
 
 	_, cmd := app.Update(WorkspaceSwitchedMsg{

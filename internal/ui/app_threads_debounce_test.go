@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/gammons/slk/internal/cache"
+	"github.com/gammons/slk/internal/ids"
 )
 
 // newTestAppWithThreadsView is the threads-view analogue of
@@ -34,10 +35,10 @@ func TestThreadsViewDebouncesNetworkFetchOnRapidJK(t *testing.T) {
 		{ChannelID: "C2", ThreadTS: "2.0", ParentText: "p2", ChannelName: "g2"},
 		{ChannelID: "C3", ThreadTS: "3.0", ParentText: "p3", ChannelName: "g3"},
 	})
-	a.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
+	a.setThreadFetcherForTest(func(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg {
 		atomic.AddInt32(&fetchCount, 1)
-		fetchedTS = append(fetchedTS, threadTS)
-		return ThreadRepliesLoadedMsg{ThreadTS: threadTS}
+		fetchedTS = append(fetchedTS, string(threadTS))
+		return ThreadRepliesLoadedMsg{ThreadTS: string(threadTS)}
 	})
 
 	// Simulate held-j: three openSelectedThreadCmd(true) invocations
@@ -97,9 +98,9 @@ func TestOpenSelectedThread_NonDebouncedPathFiresImmediately(t *testing.T) {
 	a := newTestAppWithThreadsView(t, []cache.ThreadSummary{
 		{ChannelID: "C1", ThreadTS: "1.0", ParentText: "p1", ChannelName: "g1"},
 	})
-	a.setThreadFetcherForTest(func(channelID, threadTS string) tea.Msg {
+	a.setThreadFetcherForTest(func(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg {
 		atomic.AddInt32(&fetched, 1)
-		return ThreadRepliesLoadedMsg{ThreadTS: threadTS}
+		return ThreadRepliesLoadedMsg{ThreadTS: string(threadTS)}
 	})
 	cmd := a.openSelectedThreadCmd(false)
 	if cmd == nil {

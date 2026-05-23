@@ -988,13 +988,14 @@ func (a *App) openThreadForSelectedMessage() tea.Cmd {
 	a.applyThreadUnreadBoundary(a.activeChannelID)
 
 	threads := a.threads
-	chID := a.activeChannelID
-	ts := threadTS
+	chID := ids.ChannelID(a.activeChannelID)
+	ts := ids.ThreadTS(threadTS)
+	parentTS := threadTS
 	var batch []tea.Cmd
 	if cached := threads.CacheRead(chID, ts); len(cached) > 1 {
 		replies := cached[1:] // strip parent; reducer expects replies-only
 		batch = append(batch, func() tea.Msg {
-			return ThreadRepliesLoadedMsg{ThreadTS: ts, Replies: replies}
+			return ThreadRepliesLoadedMsg{ThreadTS: parentTS, Replies: replies}
 		})
 	}
 	batch = append(batch, func() tea.Msg { return threads.Fetch(chID, ts) })
@@ -1165,15 +1166,17 @@ func (a *App) openSelectedThreadCmd(debounce bool) tea.Cmd {
 	}
 	threads := a.threads
 	chID, threadTS := sum.ChannelID, sum.ThreadTS
+	tChID := ids.ChannelID(chID)
+	tThreadTS := ids.ThreadTS(threadTS)
 	if !debounce {
 		var batch []tea.Cmd
-		if cached := threads.CacheRead(chID, threadTS); len(cached) > 1 {
+		if cached := threads.CacheRead(tChID, tThreadTS); len(cached) > 1 {
 			replies := cached[1:] // strip parent; reducer expects replies-only
 			batch = append(batch, func() tea.Msg {
 				return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: replies}
 			})
 		}
-		batch = append(batch, func() tea.Msg { return threads.Fetch(chID, threadTS) })
+		batch = append(batch, func() tea.Msg { return threads.Fetch(tChID, tThreadTS) })
 		return tea.Batch(batch...)
 	}
 	a.pendingThreadFetchGen++
@@ -1191,7 +1194,7 @@ func (a *App) applyThreadUnreadBoundary(channelID string) {
 	if channelID == "" {
 		return
 	}
-	a.threadPanel.SetUnreadBoundary(a.threads.ChannelLastRead(channelID))
+	a.threadPanel.SetUnreadBoundary(a.threads.ChannelLastRead(ids.ChannelID(channelID)))
 }
 
 // scheduleThreadsDirty returns a tea.Cmd that fires a ThreadsListDirtyMsg

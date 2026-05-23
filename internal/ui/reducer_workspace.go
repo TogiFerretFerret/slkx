@@ -59,6 +59,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/styles"
 )
 
@@ -206,7 +207,7 @@ func reduceWorkspaceReady(a *App, m WorkspaceReadyMsg) tea.Cmd {
 	// TeamID == activeTeamID check, so background fetches are
 	// dropped without affecting the active sidebar.
 	threads := a.threads
-	team := m.TeamID
+	team := ids.TeamID(m.TeamID)
 	batch = append(batch, func() tea.Msg { return threads.ListFetch(team) })
 	return tea.Batch(batch...)
 }
@@ -302,7 +303,7 @@ func reduceWorkspaceSwitched(a *App, m WorkspaceSwitchedMsg) tea.Cmd {
 	// Kick off an initial threads-list fetch so the sidebar
 	// Threads row badge populates before the user opens the view.
 	threads := a.threads
-	team := m.TeamID
+	team := ids.TeamID(m.TeamID)
 	batch = append(batch, func() tea.Msg { return threads.ListFetch(team) })
 	return tea.Batch(batch...)
 }

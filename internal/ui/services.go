@@ -134,33 +134,33 @@ func (r reactionAdapter) RecordFrecent(emoji string) {
 type ThreadService interface {
 	// Fetch retrieves replies for threadTS in channelID from Slack.
 	// Returns a tea.Msg (typically ThreadRepliesLoadedMsg).
-	Fetch(channelID, threadTS string) tea.Msg
+	Fetch(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg
 
 	// CacheRead returns cached replies (or nil) so the thread panel
 	// can populate without waiting for the network. A non-empty
 	// return causes immediate render; the subsequent Fetch result
 	// overwrites with authoritative data.
-	CacheRead(channelID, threadTS string) []messages.MessageItem
+	CacheRead(channelID ids.ChannelID, threadTS ids.ThreadTS) []messages.MessageItem
 
 	// Mark marks the thread as read on Slack's servers
 	// (subscriptions.thread.mark). channelID is the parent channel,
 	// threadTS is the parent message ts, ts is the latest reply ts
 	// the user has now seen. Best-effort and non-blocking.
-	Mark(channelID, threadTS, ts string)
+	Mark(channelID ids.ChannelID, threadTS ids.ThreadTS, ts ids.MessageTS)
 
 	// SendReply posts a reply to threadTS in channelID. Returns a
 	// tea.Msg (typically ThreadReplySentMsg or ThreadReplySendFailedMsg).
-	SendReply(channelID, threadTS, text string) tea.Msg
+	SendReply(channelID ids.ChannelID, threadTS ids.ThreadTS, text string) tea.Msg
 
 	// ListFetch loads the involved-threads list for the workspace
 	// (Slack subscriptions.list). Returns a tea.Msg (typically
 	// ThreadsListLoadedMsg).
-	ListFetch(teamID string) tea.Msg
+	ListFetch(teamID ids.TeamID) tea.Msg
 
 	// ChannelLastRead returns the parent channel's last_read_ts so
 	// the thread panel can render a "── new ──" boundary. Optional;
 	// returning "" disables the unread boundary in the thread panel.
-	ChannelLastRead(channelID string) string
+	ChannelLastRead(channelID ids.ChannelID) string
 }
 
 // ThreadServiceFuncs is the closure bundle accepted by
@@ -172,7 +172,7 @@ type ThreadServiceFuncs struct {
 	Mark            ThreadMarkFunc
 	SendReply       ThreadReplySendFunc
 	ListFetch       ThreadsListFetchFunc
-	ChannelLastRead func(channelID string) string
+	ChannelLastRead func(channelID ids.ChannelID) string
 }
 
 // NewThreadService builds a ThreadService from a ThreadServiceFuncs
@@ -191,42 +191,42 @@ type threadAdapter struct {
 	fns ThreadServiceFuncs
 }
 
-func (t threadAdapter) Fetch(channelID, threadTS string) tea.Msg {
+func (t threadAdapter) Fetch(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg {
 	if t.fns.Fetch == nil {
 		return nil
 	}
 	return t.fns.Fetch(channelID, threadTS)
 }
 
-func (t threadAdapter) CacheRead(channelID, threadTS string) []messages.MessageItem {
+func (t threadAdapter) CacheRead(channelID ids.ChannelID, threadTS ids.ThreadTS) []messages.MessageItem {
 	if t.fns.CacheRead == nil {
 		return nil
 	}
 	return t.fns.CacheRead(channelID, threadTS)
 }
 
-func (t threadAdapter) Mark(channelID, threadTS, ts string) {
+func (t threadAdapter) Mark(channelID ids.ChannelID, threadTS ids.ThreadTS, ts ids.MessageTS) {
 	if t.fns.Mark == nil {
 		return
 	}
 	t.fns.Mark(channelID, threadTS, ts)
 }
 
-func (t threadAdapter) SendReply(channelID, threadTS, text string) tea.Msg {
+func (t threadAdapter) SendReply(channelID ids.ChannelID, threadTS ids.ThreadTS, text string) tea.Msg {
 	if t.fns.SendReply == nil {
 		return nil
 	}
 	return t.fns.SendReply(channelID, threadTS, text)
 }
 
-func (t threadAdapter) ListFetch(teamID string) tea.Msg {
+func (t threadAdapter) ListFetch(teamID ids.TeamID) tea.Msg {
 	if t.fns.ListFetch == nil {
 		return nil
 	}
 	return t.fns.ListFetch(teamID)
 }
 
-func (t threadAdapter) ChannelLastRead(channelID string) string {
+func (t threadAdapter) ChannelLastRead(channelID ids.ChannelID) string {
 	if t.fns.ChannelLastRead == nil {
 		return ""
 	}

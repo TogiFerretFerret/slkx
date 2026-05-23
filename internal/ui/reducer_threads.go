@@ -44,6 +44,7 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/slack/mrkdwn"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/statusbar"
@@ -68,13 +69,14 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		threads := a.threads
-		chID, threadTS := m.channelID, m.threadTS
+		chID := ids.ChannelID(m.channelID)
+		threadTS := ids.ThreadTS(m.threadTS)
+		parentTS := m.threadTS
 		var batch []tea.Cmd
 		if cached := threads.CacheRead(chID, threadTS); len(cached) > 1 {
 			replies := cached[1:] // strip parent; reducer expects replies-only
-			ts := threadTS
 			batch = append(batch, func() tea.Msg {
-				return ThreadRepliesLoadedMsg{ThreadTS: ts, Replies: replies}
+				return ThreadRepliesLoadedMsg{ThreadTS: parentTS, Replies: replies}
 			})
 		}
 		batch = append(batch, func() tea.Msg { return threads.Fetch(chID, threadTS) })
@@ -112,7 +114,9 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		var cmd tea.Cmd
 		if channelID != "" && m.ThreadTS != "" {
 			threads := a.threads
-			chID, threadTS, ts := channelID, m.ThreadTS, latestTS
+			chID := ids.ChannelID(channelID)
+			threadTS := ids.ThreadTS(m.ThreadTS)
+			ts := ids.MessageTS(latestTS)
 			cmd = func() tea.Msg {
 				threads.Mark(chID, threadTS, ts)
 				return nil
@@ -131,7 +135,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		var batch []tea.Cmd
 		if a.activeTeamID != "" {
 			threads := a.threads
-			team := a.activeTeamID
+			team := ids.TeamID(a.activeTeamID)
 			batch = append(batch, func() tea.Msg { return threads.ListFetch(team) })
 		}
 		// Activation is a single event -- fire the fetch immediately
@@ -166,7 +170,7 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		threads := a.threads
-		team := a.activeTeamID
+		team := ids.TeamID(a.activeTeamID)
 		return func() tea.Msg { return threads.ListFetch(team) }, true
 
 	case SendThreadReplyMsg:
@@ -189,7 +193,9 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			})
 		}
 		threads := a.threads
-		chID, ts, text := m.ChannelID, m.ThreadTS, m.Text
+		chID := ids.ChannelID(m.ChannelID)
+		ts := ids.ThreadTS(m.ThreadTS)
+		text := m.Text
 		return func() tea.Msg {
 			result := threads.SendReply(chID, ts, text)
 			switch r := result.(type) {

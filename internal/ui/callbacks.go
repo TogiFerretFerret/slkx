@@ -66,27 +66,27 @@ type MessageDeleteFunc func(channelID ids.ChannelID, ts ids.MessageTS) tea.Msg
 type MarkUnreadFunc func(channelID ids.ChannelID, threadTS ids.ThreadTS, boundaryTS ids.MessageTS, unreadCount int) tea.Msg
 
 // ThreadFetchFunc is called when the user opens a thread.
-type ThreadFetchFunc func(channelID, threadTS string) tea.Msg
+type ThreadFetchFunc func(channelID ids.ChannelID, threadTS ids.ThreadTS) tea.Msg
 
 // ThreadCacheReadFunc is called synchronously when a thread is opened;
 // returns cached replies (or nil) so the thread panel can populate
 // without waiting for the network. Returning a non-empty slice causes
 // the thread panel to render immediately; the subsequent network
 // response overwrites with authoritative data.
-type ThreadCacheReadFunc func(channelID, threadTS string) []messages.MessageItem
+type ThreadCacheReadFunc func(channelID ids.ChannelID, threadTS ids.ThreadTS) []messages.MessageItem
 
 // ThreadMarkFunc is called to mark a thread as read on Slack's servers
 // (subscriptions.thread.mark). channelID is the parent channel, threadTS
 // is the parent message ts, and ts is the latest reply ts the user has now
 // seen. Implementations should be best-effort and non-blocking.
-type ThreadMarkFunc func(channelID, threadTS, ts string)
+type ThreadMarkFunc func(channelID ids.ChannelID, threadTS ids.ThreadTS, ts ids.MessageTS)
 
 // ThreadReplySendFunc is called when the user sends a thread reply.
-type ThreadReplySendFunc func(channelID, threadTS, text string) tea.Msg
+type ThreadReplySendFunc func(channelID ids.ChannelID, threadTS ids.ThreadTS, text string) tea.Msg
 
 // ThreadsListFetchFunc loads the involved-threads list for a workspace.
 // Returns the resulting tea.Msg (typically ThreadsListLoadedMsg).
-type ThreadsListFetchFunc func(teamID string) tea.Msg
+type ThreadsListFetchFunc func(teamID ids.TeamID) tea.Msg
 
 type ReactionAddFunc func(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error
 type ReactionRemoveFunc func(channelID ids.ChannelID, messageTS ids.MessageTS, emoji string) error
