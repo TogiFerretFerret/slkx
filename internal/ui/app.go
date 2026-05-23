@@ -1837,40 +1837,8 @@ func (a *App) View() tea.View {
 	var panels []string
 	panels = append(panels, a.renderRail(railWidth, contentHeight, themeVer))
 
-	// Render sidebar. Sidebar uses SidebarBackground so themes with a
-	// distinct dark sidebar (e.g. Slack Default) render correctly: both the
-	// rounded border's own background and the right-padding fill match the
-	// sidebar's panel color rather than the message pane's.
 	if a.sidebarVisible {
-		sbFocused := a.focusedPanel == PanelSidebar && a.mode != ModeInsert
-		// Push focus into the sidebar so the cursor "▌" glyph dims when
-		// the panel is unfocused. This must happen BEFORE the panelCache
-		// hit-check below, since SetFocused bumps the panel's Version on
-		// a flip and the cache key includes that version.
-		a.sidebar.SetFocused(sbFocused)
-		sbLayoutKey := themeVer<<1 | boolToInt(sbFocused)
-		if c := &a.renderCache.sidebar; !c.hit(a.sidebar.Version(), sidebarWidth, contentHeight, sbLayoutKey) {
-			borderStyle := lipgloss.NewStyle().
-				BorderStyle(lipgloss.RoundedBorder()).
-				BorderForeground(styles.Border).
-				BorderBackground(styles.SidebarBackground).
-				Background(styles.SidebarBackground).
-				Width(sidebarWidth)
-			if sbFocused {
-				borderStyle = lipgloss.NewStyle().
-					BorderStyle(lipgloss.ThickBorder()).
-					BorderForeground(styles.Primary).
-					BorderBackground(styles.SidebarBackground).
-					Background(styles.SidebarBackground).
-					Width(sidebarWidth)
-			}
-			sidebarView := a.sidebar.View(contentHeight-2, sidebarWidth)
-			sidebarView = borderStyle.Render(sidebarView)
-			out := exactSizeBg(sidebarView, sidebarWidth+sidebarBorder, contentHeight, styles.SidebarBackground)
-			c.store(out, a.sidebar.Version(), sidebarWidth, contentHeight, sbLayoutKey)
-		}
-		panels = append(panels, a.renderCache.sidebar.output)
-		a.layout.SetSidebarHeight(contentHeight - 2)
+		panels = append(panels, a.renderSidebar(sidebarWidth, sidebarBorder, contentHeight, themeVer))
 	}
 
 	// If the full-screen image preview is open, render a single panel
