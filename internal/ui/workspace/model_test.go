@@ -82,3 +82,59 @@ func TestClickAt_EmptyRail(t *testing.T) {
 		t.Error("ClickAt on empty rail must return ok=false")
 	}
 }
+
+func TestNameByID(t *testing.T) {
+	m := New([]WorkspaceItem{
+		{ID: "T1", Name: "SWAP", Initials: "SW"},
+		{ID: "T2", Name: "Home", Initials: "HO"},
+	}, 0)
+	cases := map[string]string{
+		"T1":        "SWAP",
+		"T2":        "Home",
+		"T-missing": "",
+		"":          "",
+	}
+	for id, want := range cases {
+		if got := m.NameByID(id); got != want {
+			t.Errorf("NameByID(%q) = %q want %q", id, got, want)
+		}
+	}
+}
+
+func TestOtherUnreadCount_NoReader(t *testing.T) {
+	m := New([]WorkspaceItem{{ID: "T1"}}, 0)
+	if got := m.OtherUnreadCount("T1"); got != 0 {
+		t.Errorf("OtherUnreadCount with no reader = %d want 0", got)
+	}
+}
+
+func TestOtherUnreadCount(t *testing.T) {
+	m := New([]WorkspaceItem{
+		{ID: "T1"}, {ID: "T2"}, {ID: "T3"},
+	}, 0)
+	m.SetUnreadReader(func() []string { return []string{"T1", "T2", "T3"} })
+
+	cases := []struct {
+		activeID string
+		want     int
+	}{
+		{"T1", 2},
+		{"T2", 2},
+		{"T3", 2},
+		{"T-missing", 3}, // active workspace not in unread set: counts all
+		{"", 3},          // empty active: counts all; caller is responsible
+	}
+	for _, tc := range cases {
+		if got := m.OtherUnreadCount(tc.activeID); got != tc.want {
+			t.Errorf("OtherUnreadCount(%q) = %d want %d", tc.activeID, got, tc.want)
+		}
+	}
+}
+
+func TestOtherUnreadCount_EmptyReaderResult(t *testing.T) {
+	m := New([]WorkspaceItem{{ID: "T1"}, {ID: "T2"}}, 0)
+	m.SetUnreadReader(func() []string { return nil })
+	if got := m.OtherUnreadCount("T1"); got != 0 {
+		t.Errorf("OtherUnreadCount with empty reader = %d want 0", got)
+	}
+}

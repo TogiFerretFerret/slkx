@@ -42,6 +42,35 @@ func (m *Model) SelectedID() string {
 	return m.items[m.selected].ID
 }
 
+// NameByID returns the workspace's display name, or "" if no item with
+// the given ID is present. Used by the App to derive the window title's
+// initials via WorkspaceInitials.
+func (m *Model) NameByID(id string) string {
+	for _, item := range m.items {
+		if item.ID == id {
+			return item.Name
+		}
+	}
+	return ""
+}
+
+// OtherUnreadCount returns the number of workspaces with unreads,
+// excluding activeID. Reads through the installed unreadReader; returns
+// 0 when no reader is set. Does not filter mute -- matches the rail
+// dot's existing semantics so the title's "+N" and the rail dots agree.
+func (m *Model) OtherUnreadCount(activeID string) int {
+	if m.unreadReader == nil {
+		return 0
+	}
+	count := 0
+	for _, id := range m.unreadReader() {
+		if id != activeID {
+			count++
+		}
+	}
+	return count
+}
+
 func (m *Model) SelectedIndex() int {
 	return m.selected
 }
