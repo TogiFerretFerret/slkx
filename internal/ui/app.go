@@ -385,6 +385,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		reduceReactions,
 		reduceThreads,
 		reduceSend,
+		reduceChannels,
 	); handled {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -760,168 +761,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.threadCompose.Reset()
 		cmds = append(cmds, a.uploadToastCmd("Sent", 2*time.Second))
 
-	case ChannelSelectedMsg:
-		if a.compose.Uploading() || a.threadCompose.Uploading() {
-			cmds = append(cmds, a.uploadToastCmd("Upload in progress", 2*time.Second))
-			break
-		}
-		a.cancelEdit()
-		// Picking a channel always exits the Threads view.
-		a.view = ViewChannels
-		a.sidebar.SetThreadsActive(false)
-		a.lastOpenedChannelID = ""
-		a.lastOpenedThreadTS = ""
-		// Close thread panel when switching channels
-		a.CloseThread()
-		a.clearSelections()
-		// Move focus to the messages pane so the user can immediately
-		// j/k through messages, react, open threads, etc. without first
-		// having to Tab/h-l out of the sidebar after picking a channel.
-		a.focusedPanel = PanelMessages
-		a.activeChannelID = msg.ID
-		a.typingOut.ResetThrottle() // reset typing throttle for new channel
-		// Update local finder ordering immediately so the next Ctrl+T
-		// sees this channel at the top of the recents.
-		now := time.Now().Unix()
-		a.channelFinder.UpdateLastVisited(msg.ID, now)
-		// Persist the visit (SQLite write + WorkspaceContext map update)
-		// asynchronously via main.go's recorder closure.
-		a.channels.RecordVisit(msg.ID)
-		if !msg.FromHistory {
-			a.navHistory.Push(a.activeTeamID, msg.ID)
-		}
-		// Tell the sidebar which channel is active so the staleness
-		// filter never hides it out from under the user.
-		a.sidebar.SetActiveChannelID(msg.ID)
-		a.messagepane.SetChannel(msg.Name, "")
-		a.messagepane.SetChannelType(msg.Type)
-
-		// Close any open mention picker before switching channels.
-		// SetUsers replaces the user list but does NOT re-run the
-		// picker's filter, so an open picker would render the
-		// previous channel's matches until the user typed or moved.
-		// CloseMention is nil-safe (no-op when already closed).
-		a.compose.CloseMention()
-		a.threadCompose.CloseMention()
-
-		a.compose.SetChannel(msg.Name)
-		a.compose.SetActiveChannel(msg.ID)
-		a.threadCompose.SetActiveChannel(msg.ID)
-		// Fire the membership fetcher on a fresh goroutine so it
-		// can't block the Update loop. Fire-and-forget — results
-		// arrive later via ChannelMembershipMsg. main.go's
-		// MembershipFetch closure ultimately calls
-		// Membership.EnsureFresh which invokes bubbletea
-		// Program.Send via pushSnapshot, and bubbletea v2's program
-		// channel is unbuffered: a Send from inside Update would
-		// deadlock waiting for the same goroutine to receive. See
-		// manager.go's EnsureFresh docs and the deadlock-regression
-		// test in app_test.go.
-		{
-			channels := a.channels
-			channelID := msg.ID
-			go channels.MembershipFetch(channelID)
-		}
-		a.statusbar.SetChannel(msg.Name)
-		a.statusbar.SetChannelType(msg.Type)
-
-		cached := a.channels.ReadCache(msg.ID)
-		syncedAt := a.channels.SyncedAt(msg.ID)
-		age := time.Duration(0)
-		if syncedAt > 0 {
-			age = time.Since(time.Unix(syncedAt, 0))
-		}
-		debuglog.Cache("ChannelSelectedMsg: channel=%s name=%q cache_hit_count=%d synced_at=%d age_ms=%d",
-			msg.ID, msg.Name, len(cached), syncedAt, age.Milliseconds())
-
-		fireFetch := func() {
-			channels := a.channels
-			chID, chName := msg.ID, msg.Name
-			debuglog.Cache("ChannelSelectedMsg: channel=%s firing background network fetch", msg.ID)
-			cmds = append(cmds, func() tea.Msg { return channels.Fetch(chID, chName) })
-		}
-
-		switch {
-		case syncedAt > 0 && age < cacheFreshThreshold:
-			// Tier 1: provably fresh (cache was just synced). Render whatever
-			// we have (cached can legitimately be empty here — e.g., a channel
-			// verified empty within the last 30s). Mark-as-read if non-empty.
-			// No fetch.
-			a.messagepane.SetLoading(false)
-			a.messagepane.SetMessages(cached)
-			a.statusbar.SetSyncing(false)
-			if len(cached) > 0 {
-				channels := a.channels
-				chID := msg.ID
-				latestTS := cached[len(cached)-1].TS
-				cmds = append(cmds, func() tea.Msg { return channels.MarkRead(chID, latestTS) })
-			}
-			debuglog.Cache("ChannelSelectedMsg: channel=%s tier=1_fresh", msg.ID)
-
-		case len(cached) > 0:
-			// Tier 2: cache exists, verify in background. Covers
-			// (a) syncedAt > 0 with age >= 30s (any age — we render and verify
-			//     rather than blanking the pane),
-			// (b) syncedAt == 0 (freshness unknown; could be a prior session's
-			//     cache or an un-wired reader). Always render + fire fetch +
-			//     show indicator so the user knows it's being checked.
-			a.messagepane.SetLoading(false)
-			a.messagepane.SetMessages(cached)
-			a.statusbar.SetSyncing(true)
-			fireFetch()
-			debuglog.Cache("ChannelSelectedMsg: channel=%s tier=2_verify", msg.ID)
-
-		default:
-			// Tier 3: no cache at all (genuine cold-start, never-visited
-			// channel). Spinner + fetch.
-			a.messagepane.SetLoading(true)
-			a.messagepane.SetMessages(nil)
-			a.statusbar.SetSyncing(false)
-			cmds = append(cmds, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-				return SpinnerTickMsg{}
-			}))
-			fireFetch()
-			debuglog.Cache("ChannelSelectedMsg: channel=%s tier=3_spinner", msg.ID)
-		}
-
-	case MessagesLoadedMsg:
-		// Distinguish the three cases of the fetcher's nil-vs-[] contract:
-		//   nil      → network failure, keep cached render
-		//   []       → channel is genuinely empty, replace with empty
-		//   non-empty → authoritative replace
-		var kind string
-		switch {
-		case msg.Messages == nil:
-			kind = "nil_keep_cache"
-		case len(msg.Messages) == 0:
-			kind = "empty_replace"
-		default:
-			kind = "full_replace"
-		}
-		debuglog.Cache("MessagesLoadedMsg: channel=%s active=%s kind=%s count=%d",
-			msg.ChannelID, a.activeChannelID, kind, len(msg.Messages))
-		if msg.ChannelID == a.activeChannelID {
-			a.statusbar.SetSyncing(false)
-			a.messagepane.SetLoading(false)
-			a.messagepane.SetLastReadTS(msg.LastReadTS)
-			// nil Messages from the fetcher signals network FAILURE, not an
-			// empty channel (empty channels return []messages.MessageItem{}).
-			// On failure, preserve whatever the cache already rendered so a
-			// transient blip doesn't blank a working view. The Slack-side
-			// fetcher logs the error before returning nil.
-			if msg.Messages != nil {
-				a.messagepane.SetMessages(msg.Messages)
-			}
-		}
-
-	case OlderMessagesLoadedMsg:
-		debuglog.Cache("OlderMessagesLoadedMsg: channel=%s active=%s count=%d",
-			msg.ChannelID, a.activeChannelID, len(msg.Messages))
-		if msg.ChannelID == a.activeChannelID {
-			a.fetchingOlder = false
-			a.messagepane.SetLoading(false)
-			a.messagepane.PrependMessages(msg.Messages)
-		}
+	// ChannelSelectedMsg, MessagesLoadedMsg, OlderMessagesLoadedMsg
+	// moved to reduceChannels (Phase 4j, reducer_channels.go).
 
 	case imgrender.ImageReadyMsg:
 		debuglog.ImgFetch("recv: kind=ready channel=%s ts=%s key=%s req_id=%d",
@@ -973,8 +814,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// MessageMarkedUnreadMsg moved to reduceSend (Phase 4i,
 	// reducer_send.go).
 
-	case ChannelMarkedRemoteMsg:
-		a.applyChannelMark(msg.ChannelID, msg.TS, msg.UnreadCount)
+	// ChannelMarkedRemoteMsg moved to reduceChannels (Phase 4j).
 
 	// ThreadMarkedRemoteMsg, threadFetchDebounceMsg, ThreadRepliesLoadedMsg,
 	// ThreadsViewActivatedMsg, ThreadsListLoadedMsg, ThreadsListDirtyMsg,
@@ -989,10 +829,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// ReactionAddedMsg, ReactionRemovedMsg, ReactionSentMsg moved
 	// to reduceReactions (Phase 4g, reducer_reactions.go).
 
-	case ChannelMarkedReadMsg:
-		debuglog.Cache("ChannelMarkedReadMsg: channel=%s active=%s (optimistic clear)",
-			msg.ChannelID, a.activeChannelID)
-		a.notifyReadStateChanged()
+	// ChannelMarkedReadMsg moved to reduceChannels (Phase 4j).
 
 	case DMNameResolvedMsg:
 		items := a.sidebar.Items()
@@ -1143,9 +980,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// WorkspaceContext.Channels in cmd/slk; App.Update only mutates
 		// the active sidebar.
 
-	case ChannelMembershipMsg:
-		a.SetChannelMembership(msg.ChannelID, msg.MemberIDs)
-		return a, nil
+	// ChannelMembershipMsg moved to reduceChannels (Phase 4j).
 
 	// SpinnerTickMsg, LoadingTimeoutMsg moved to
 	// workspaceBootstrap.Handle (Phase 4e).
@@ -1215,47 +1050,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.SetCustomEmoji(msg.CustomEmoji)
 		}
 
-	case ChannelJoinedMsg:
-		// Add the newly-joined channel to the sidebar (so it shows up in the
-		// regular list) and mark it joined in the finder. Then dispatch a
-		// ChannelSelectedMsg to open it.
-		newItem := sidebar.ChannelItem{
-			ID:   msg.ID,
-			Name: msg.Name,
-			Type: "channel",
-		}
-		items := a.sidebar.Items()
-		// Avoid double-add if a presence/list event raced ahead.
-		alreadyInSidebar := false
-		for _, it := range items {
-			if it.ID == msg.ID {
-				alreadyInSidebar = true
-				break
-			}
-		}
-		if !alreadyInSidebar {
-			items = append(items, newItem)
-			a.SetChannels(items)
-		}
-		a.channelFinder.MarkJoined(msg.ID)
-		a.sidebar.SelectByID(msg.ID)
-		cmds = append(cmds, func() tea.Msg {
-			// ChannelJoinedMsg only fires for public channels via the
-			// channel finder; type is always "channel".
-			return ChannelSelectedMsg{ID: msg.ID, Name: msg.Name, Type: "channel"}
-		})
-
-	case ChannelJoinFailedMsg:
-		// Nothing fancy yet -- could surface a status-bar toast in future.
-		log.Printf("warning: failed to join channel %s: %v", msg.Name, msg.Err)
-
-	case BrowseableChannelsLoadedMsg:
-		// Only apply to the channel finder if this matches the workspace
-		// whose items are currently loaded. Per-workspace browseable items
-		// are kept in main.go's WorkspaceContext for any future switch.
-		if msg.TeamID == a.activeTeamID {
-			a.channelFinder.SetBrowseable(msg.Items)
-		}
+	// ChannelJoinedMsg, ChannelJoinFailedMsg, BrowseableChannelsLoadedMsg
+	// moved to reduceChannels (Phase 4j).
 
 	// WorkspaceFailedMsg moved to workspaceBootstrap.Handle (Phase 4e).
 
