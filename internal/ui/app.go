@@ -386,6 +386,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		reduceThreads,
 		reduceSend,
 		reduceChannels,
+		reduceWorkspace,
 	); handled {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -831,228 +832,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// ChannelMarkedReadMsg moved to reduceChannels (Phase 4j).
 
-	case DMNameResolvedMsg:
-		items := a.sidebar.Items()
-		for i := range items {
-			if items[i].ID == msg.ChannelID {
-				items[i].Name = msg.DisplayName
-				if msg.IsBot && items[i].Type == "dm" {
-					items[i].Type = "app"
-				}
-				break
-			}
-		}
-		a.SetChannels(items)
+	// DMNameResolvedMsg, UserResolvedMsg, UserExternalMsg,
+	// WorkspaceSwitchedMsg moved to reduceWorkspace (Phase 4k,
+	// reducer_workspace.go).
 
-	case UserResolvedMsg:
-		if msg.TeamID != a.activeTeamID {
-			break
-		}
-		a.messagepane.PatchUserName(msg.UserID, msg.DisplayName)
-		a.threadPanel.PatchUserName(msg.UserID, msg.DisplayName)
-		// IsBot affects DM channel-type classification, but that's
-		// orchestrated by DMNameResolvedMsg; this handler is only the
-		// in-history name patch. IsBot is carried for forward
-		// compatibility but not consumed here.
-
-	case UserExternalMsg:
-		if a.externalUsers == nil {
-			a.externalUsers = map[string]bool{}
-		}
-		if msg.IsExternal {
-			a.externalUsers[msg.UserID] = true
-		} else {
-			delete(a.externalUsers, msg.UserID)
-		}
-		if len(a.userNames) > 0 {
-			a.SetUserNames(a.userNames)
-		}
-		return a, nil
-
-	case WorkspaceSwitchedMsg:
-		if a.compose.Uploading() || a.threadCompose.Uploading() {
-			cmds = append(cmds, a.uploadToastCmd("Upload in progress", 2*time.Second))
-			break
-		}
-		// Remember which channel we were on in the workspace we're
-		// leaving so that switching back lands the user on the same
-		// channel rather than always snapping to the sidebar's first
-		// entry.
-		if a.activeTeamID != "" && a.activeChannelID != "" && a.activeTeamID != msg.TeamID {
-			a.lastChannelByTeam[a.activeTeamID] = a.activeChannelID
-		}
-		a.cancelEdit()
-		// Always land in ViewChannels and drop any per-workspace
-		// threads-view state so stale summaries / unread badges from the
-		// previous workspace can't leak in. The sidebar cursor is moved
-		// to the restored channel below (after SetChannels); only fall
-		// back to the Threads row when the new workspace has no channels
-		// at all.
-		a.view = ViewChannels
-		a.sidebar.SetThreadsActive(false)
-		a.threadsView.SetSummaries(nil)
-		a.sidebar.SetThreadsUnreadCount(0)
-		a.lastOpenedChannelID = ""
-		a.lastOpenedThreadTS = ""
-		a.CloseThread()
-		a.clearSelections()
-		a.compose.Reset()
-		a.statusbar.SetSyncing(false) // defensive: don't carry stale sync state across workspaces
-		// Pane is left as-is — the queued ChannelSelectedMsg below will paint
-		// over it via the three-tier dispatch (Task 10). For empty workspaces
-		// (no Channels) the pane is cleared explicitly in the else branch
-		// below.
-		a.SetMode(ModeNormal)
-		a.compose.Blur()
-		a.sidebar.SetSectionsProvider(msg.SectionsProvider)
-		a.SetChannels(msg.Channels)
-		a.channelFinder.SetItems(msg.FinderItems)
-		// SetExternalUsers re-pushes user-names; calling SetUserNames
-		// last is the canonical state.
-		a.SetExternalUsers(msg.ExternalUsers)
-		a.SetUserNames(msg.UserNames)
-		a.SetCustomEmoji(msg.CustomEmoji)
-		a.currentUserID = msg.UserID
-		a.activeTeamID = msg.TeamID
-		pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
-		a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
-		// Apply per-workspace theme. Must run on Update goroutine so the
-		// component cache invalidations and compose-style refreshes below
-		// take effect on the next render.
-		if msg.Theme != "" {
-			styles.Apply(msg.Theme, a.themeOverrides)
-			a.messagepane.InvalidateCache()
-			a.threadPanel.InvalidateCache()
-			a.sidebar.InvalidateCache()
-			a.compose.RefreshStyles()
-			a.threadCompose.RefreshStyles()
-		}
-		a.workspaceRail.SelectByID(msg.TeamID)
-		// Restore the last-viewed channel for this workspace if we have
-		// one and it still exists; otherwise fall back to the first
-		// channel in the sidebar. Move the sidebar cursor to that
-		// channel as well so the highlight matches the messages pane.
-		if len(msg.Channels) > 0 {
-			target := msg.Channels[0]
-			if savedID, ok := a.lastChannelByTeam[msg.TeamID]; ok && savedID != "" {
-				for _, ch := range msg.Channels {
-					if ch.ID == savedID {
-						target = ch
-						break
-					}
-				}
-			}
-			a.sidebar.SelectByID(target.ID)
-			cmds = append(cmds, func() tea.Msg {
-				return ChannelSelectedMsg{ID: target.ID, Name: target.Name, Type: target.Type}
-			})
-		} else {
-			a.sidebar.SelectThreadsRow()
-			a.messagepane.SetLoading(false)
-			a.messagepane.SetMessages(nil)
-		}
-		// Kick off an initial threads-list fetch so the sidebar Threads
-		// row badge populates before the user opens the view.
-		threads := a.threads
-		team := msg.TeamID
-		cmds = append(cmds, func() tea.Msg { return threads.ListFetch(team) })
-
-	case ReadStateChangedMsg:
-		// Persistent read state changed in the cache. Invalidate the
-		// sidebar and refresh the workspace rail so both re-read
-		// from the DB.
-		a.notifyReadStateChanged()
-		return a, nil
-
-	case ConversationOpenedMsg:
-		if msg.TeamID == a.activeTeamID {
-			a.sidebar.UpsertItem(msg.Item)
-		}
-		// Inactive-workspace events update WorkspaceContext.Channels
-		// from the rtmEventHandler in cmd/slk/main.go (Task 6); App.Update
-		// only mutates the active sidebar.
-
-	case SectionsRefreshedMsg:
-		if msg.TeamID == a.activeTeamID {
-			a.SetChannels(msg.Channels)
-		}
-		// Inactive-workspace events have already updated the
-		// WorkspaceContext.Channels in cmd/slk; App.Update only mutates
-		// the active sidebar.
+	// ConversationOpenedMsg, SectionsRefreshedMsg, ReadStateChangedMsg,
+	// WorkspaceReadyMsg, CustomEmojisLoadedMsg moved to
+	// reduceWorkspace (Phase 4k).
 
 	// ChannelMembershipMsg moved to reduceChannels (Phase 4j).
-
 	// SpinnerTickMsg, LoadingTimeoutMsg moved to
 	// workspaceBootstrap.Handle (Phase 4e).
-
-	case WorkspaceReadyMsg:
-		a.bootstrap.MarkReady(msg.TeamName)
-		// Only the workspace flagged InitialActive auto-claims active state.
-		// main.go computes this deterministically (default_workspace match,
-		// else first to connect) so two simultaneous WorkspaceReadyMsgs
-		// can no longer race on (activeChannelID == "") and both claim.
-		// bootstrapActiveClaimed is a defensive one-shot guard against any
-		// future bug that delivers InitialActive=true twice.
-		if msg.InitialActive && a.bootstrap.ClaimInitialActive() {
-			a.view = ViewChannels
-			a.sidebar.SetThreadsActive(false)
-			a.threadsView.SetSummaries(nil)
-			a.sidebar.SetThreadsUnreadCount(0)
-			a.lastOpenedChannelID = ""
-			a.lastOpenedThreadTS = ""
-			// Apply the resolved theme for the initial active workspace.
-			// Without this, per-workspace themes silently revert to the
-			// global default on startup until the user manually switches
-			// workspaces.
-			if msg.Theme != "" {
-				styles.Apply(msg.Theme, a.themeOverrides)
-				a.messagepane.InvalidateCache()
-				a.threadPanel.InvalidateCache()
-				a.sidebar.InvalidateCache()
-				a.compose.RefreshStyles()
-				a.threadCompose.RefreshStyles()
-			}
-			a.sidebar.SetSectionsProvider(msg.SectionsProvider)
-			a.SetChannels(msg.Channels)
-			a.channelFinder.SetItems(msg.FinderItems)
-			// SetExternalUsers re-pushes user-names; calling SetUserNames
-			// last is the canonical state.
-			a.SetExternalUsers(msg.ExternalUsers)
-			a.SetUserNames(msg.UserNames)
-			a.SetCustomEmoji(msg.CustomEmoji)
-			a.currentUserID = msg.UserID
-			a.activeTeamID = msg.TeamID
-			pres, dndEnabled, dndEnd, _ := a.presence.Status(a.activeTeamID)
-			a.statusbar.SetStatus(pres, dndEnabled, dndEnd)
-			a.workspaceRail.SelectByID(msg.TeamID)
-			if len(msg.Channels) > 0 {
-				first := msg.Channels[0]
-				a.messagepane.SetLoading(true)
-				a.messagepane.SetMessages(nil)
-				cmds = append(cmds, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-					return SpinnerTickMsg{}
-				}))
-				cmds = append(cmds, func() tea.Msg {
-					return ChannelSelectedMsg{ID: first.ID, Name: first.Name, Type: first.Type}
-				})
-			}
-		}
-		// Initial threads-list fetch fires for every workspace as it
-		// becomes ready; the result is gated by ThreadsListLoadedMsg's
-		// TeamID == activeTeamID check, so background fetches are
-		// dropped without affecting the active sidebar.
-		threads := a.threads
-		team := msg.TeamID
-		cmds = append(cmds, func() tea.Msg { return threads.ListFetch(team) })
-
-	case CustomEmojisLoadedMsg:
-		if msg.TeamID == a.activeTeamID {
-			a.SetCustomEmoji(msg.CustomEmoji)
-		}
-
 	// ChannelJoinedMsg, ChannelJoinFailedMsg, BrowseableChannelsLoadedMsg
 	// moved to reduceChannels (Phase 4j).
-
 	// WorkspaceFailedMsg moved to workspaceBootstrap.Handle (Phase 4e).
 
 	// UserTypingMsg, TypingExpiredMsg moved to typingTracker.Handle
