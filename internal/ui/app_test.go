@@ -2476,10 +2476,10 @@ func TestPreviewOverlay_EscClosesAndNils(t *testing.T) {
 	// is acceptable for this test since we never call View(); the close
 	// path doesn't touch the renderer.
 	p := imgpkg.NewPreview(imgpkg.PreviewInput{Name: "x.png"})
-	app.previewOverlay = &p
+	app.preview.overlay = &p
 
 	_, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if app.previewOverlay != nil {
+	if app.preview.overlay != nil {
 		t.Fatal("Esc should clear previewOverlay")
 	}
 }
@@ -2490,10 +2490,10 @@ func TestPreviewOverlay_EscClosesAndNils(t *testing.T) {
 func TestPreviewOverlay_QClosesAndNils(t *testing.T) {
 	app := NewApp()
 	p := imgpkg.NewPreview(imgpkg.PreviewInput{Name: "x.png"})
-	app.previewOverlay = &p
+	app.preview.overlay = &p
 
 	_, _ = app.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	if app.previewOverlay != nil {
+	if app.preview.overlay != nil {
 		t.Fatal("q should clear previewOverlay")
 	}
 	if app.confirmPrompt.IsVisible() {
@@ -2508,10 +2508,10 @@ func TestPreviewOverlay_QClosesAndNils(t *testing.T) {
 func TestPreviewOverlay_EnterClosesAndReturnsCmd(t *testing.T) {
 	app := NewApp()
 	p := imgpkg.NewPreview(imgpkg.PreviewInput{Name: "x.png", Path: "/tmp/x.png"})
-	app.previewOverlay = &p
+	app.preview.overlay = &p
 
 	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if app.previewOverlay != nil {
+	if app.preview.overlay != nil {
 		t.Fatal("Enter should clear previewOverlay")
 	}
 	if cmd == nil {
@@ -2539,10 +2539,10 @@ func TestPreviewOverlay_OtherKeysSwallowed(t *testing.T) {
 	}
 
 	p := imgpkg.NewPreview(imgpkg.PreviewInput{Name: "x.png"})
-	app.previewOverlay = &p
+	app.preview.overlay = &p
 
 	_, _ = app.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if app.previewOverlay == nil {
+	if app.preview.overlay == nil {
 		t.Fatal("j must NOT close the preview overlay")
 	}
 	afterIdx := -1

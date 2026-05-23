@@ -305,27 +305,10 @@ type App struct {
 	// startup. Used to render the full-screen preview overlay.
 	imgProtocol imgpkg.Protocol
 
-	// previewOverlay holds the full-screen image preview state. nil when
-	// no preview is open. View() composes its output over the
-	// messages+thread region; key handling routes through it while
-	// non-nil.
-	previewOverlay *imgpkg.Preview
-	// previewSource records (channel, ts, attIdx) of the currently
-	// displayed image so h/l/arrow cycling can locate sibling
-	// attachments. Zero values when no preview is open.
-	previewChannel string
-	previewTS      string
-	previewAttIdx  int
-}
-
-// previewSpinnerTickInterval is the redraw cadence for the loading
-// spinner. 100ms feels alive without being a CPU hog.
-const previewSpinnerTickInterval = 100 * time.Millisecond
-
-func previewSpinnerTickCmd() tea.Cmd {
-	return tea.Tick(previewSpinnerTickInterval, func(time.Time) tea.Msg {
-		return previewSpinnerTickMsg{}
-	})
+	// preview owns the full-screen image preview overlay state
+	// (overlay + the channel/ts/attIdx triple that lets h/l/arrow
+	// cycling locate sibling attachments). See internal/ui/imagepreview.go.
+	preview *imagePreviewController
 }
 
 func NewApp() *App {
@@ -359,6 +342,7 @@ func NewApp() *App {
 		presence:             newPresenceController(),
 		renderCache:          newPanelRenderCache(),
 		drag:                 newDragState(),
+		preview:              newImagePreviewController(),
 		lastChannelByTeam:    map[string]string{},
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
@@ -418,26 +402,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// doesn't leak through. Resize / mouse / async messages still flow
 	// normally so the rest of the UI keeps ticking — including the
 	// previewLoadedMsg arm that swaps the cycled image into place.
-	if a.previewOverlay != nil && !a.previewOverlay.IsClosed() {
+	if a.preview.Active() {
 		if km, ok := msg.(tea.KeyMsg); ok {
 			switch km.String() {
 			case "esc", "q":
-				a.previewOverlay.Close()
-				a.previewOverlay = nil
+				a.preview.Close()
 				return a, nil
 			case "enter":
-				path := a.previewOverlay.Path()
-				a.previewOverlay.Close()
-				a.previewOverlay = nil
+				path := a.preview.Overlay().Path()
+				a.preview.Close()
 				return a, openInSystemViewerCmd(path)
 			case "h", "left":
-				if a.previewOverlay.SiblingCount() > 1 {
-					return a, a.cycleImagePreviewCmd(a.previewChannel, a.previewTS, a.previewAttIdx, -1)
+				if a.preview.Overlay().SiblingCount() > 1 {
+					return a, a.cycleImagePreviewCmd(a.preview.Channel(), a.preview.TS(), a.preview.AttIdx(), -1)
 				}
 				return a, nil
 			case "l", "right":
-				if a.previewOverlay.SiblingCount() > 1 {
-					return a, a.cycleImagePreviewCmd(a.previewChannel, a.previewTS, a.previewAttIdx, +1)
+				if a.preview.Overlay().SiblingCount() > 1 {
+					return a, a.cycleImagePreviewCmd(a.preview.Channel(), a.preview.TS(), a.preview.AttIdx(), +1)
 				}
 				return a, nil
 			}
@@ -1113,18 +1095,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// felt hung on slow-fetching previews (Slack Connect channels
 		// where multi-auth retry can take seconds).
 		if cmd := a.openImagePreviewCmd(msg.Channel, msg.TS, msg.AttIdx); cmd != nil {
-			a.previewChannel = msg.Channel
-			a.previewTS = msg.TS
-			a.previewAttIdx = msg.AttIdx
 			name, sibCount, sibIndex := a.previewMetaForOpen(msg.Channel, msg.TS, msg.AttIdx)
 			loading := imgpkg.NewLoadingPreview(name, sibCount, sibIndex)
-			a.previewOverlay = &loading
+			a.preview.Open(&loading, msg.Channel, msg.TS, msg.AttIdx)
 			cmds = append(cmds, cmd, previewSpinnerTickCmd())
 		}
 
 	case previewSpinnerTickMsg:
-		if a.previewOverlay != nil && !a.previewOverlay.IsClosed() && a.previewOverlay.IsLoading() {
-			a.previewOverlay.AdvanceLoadingFrame()
+		if a.preview.Active() && a.preview.Overlay().IsLoading() {
+			a.preview.Overlay().AdvanceLoadingFrame()
 			cmds = append(cmds, previewSpinnerTickCmd())
 		}
 
@@ -1139,19 +1118,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// If the overlay is nil or already closed, the user dismissed
 		// it before the bytes arrived; drop the image on the floor.
-		if a.previewOverlay != nil && !a.previewOverlay.IsClosed() {
+		if a.preview.Active() {
 			// Swap bytes into the existing overlay (whether it's the
 			// initial loading shell or an already-displayed image
 			// being cycled). This preserves the overlay layout and
 			// keeps cycling state coherent.
-			a.previewOverlay.SwapImage(input)
+			a.preview.Overlay().SwapImage(input)
 			if msg.isCycle {
 				// Cycling case: update the remembered attIdx so a
 				// subsequent cycle key starts from the new position.
-				if msgItem, ok := a.findMessageInActiveChannel(a.previewChannel, a.previewTS); ok {
+				if msgItem, ok := a.findMessageInActiveChannel(a.preview.Channel(), a.preview.TS()); ok {
 					for i, att := range msgItem.Attachments {
 						if att.FileID == msg.FileID {
-							a.previewAttIdx = i
+							a.preview.SetAttIdx(i)
 							break
 						}
 					}
@@ -1163,9 +1142,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		log.Printf("preview fetch error: %v", msg.Err)
 		// Dismiss the loading overlay so the user isn't left staring at
 		// a permanent spinner.
-		if a.previewOverlay != nil && a.previewOverlay.IsLoading() {
-			a.previewOverlay.Close()
-			a.previewOverlay = nil
+		if a.preview.Overlay() != nil && a.preview.Overlay().IsLoading() {
+			a.preview.Close()
 		}
 
 	case NewMessageMsg:
@@ -4363,7 +4341,7 @@ func (a *App) View() tea.View {
 	// render normally so the user can see context. The flag below
 	// guards the messages-pane and thread-pane render blocks and is
 	// also checked to substitute a single preview panel after them.
-	previewActive := a.previewOverlay != nil && !a.previewOverlay.IsClosed()
+	previewActive := a.preview.Active()
 
 	// Render message pane with border.
 	//
@@ -4599,7 +4577,7 @@ func (a *App) View() tea.View {
 		if a.threadVisible && threadWidth > 0 {
 			overlayW += threadWidth + threadBorder
 		}
-		overlayContent := a.previewOverlay.View(overlayW, contentHeight, a.imgProtocol)
+		overlayContent := a.preview.Overlay().View(overlayW, contentHeight, a.imgProtocol)
 		overlayPanel := exactSize(overlayContent, overlayW, contentHeight)
 		panels = append(panels, overlayPanel)
 	}
