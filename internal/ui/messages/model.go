@@ -18,7 +18,7 @@ import (
 	"github.com/gammons/slk/internal/ui/scrollbar"
 	"github.com/gammons/slk/internal/ui/selection"
 	"github.com/gammons/slk/internal/ui/styles"
-	emoji "github.com/kyokomi/emoji/v2"
+	kyoemoji "github.com/kyokomi/emoji/v2"
 )
 
 type MessageItem struct {
@@ -1268,6 +1268,53 @@ func (m *Model) OldestTS() string {
 // buildCache and partialRebuild share. Computing them once per
 // (width, theme) avoids re-allocating identical lipgloss styles per
 // message during the per-message render loop.
+// debugCheckModal logs any line whose visible width differs from the
+// majority width across the slice. Used to surface the off-by-one
+// emoji-width bug seen in the field. No-op when SLK_DEBUG is unset.
+func debugCheckModal(stage string, lines []string) {
+	if !debuglog.Enabled() {
+		return
+	}
+	if len(lines) <= 1 {
+		return
+	}
+	widths := make([]int, len(lines))
+	counts := make(map[int]int, 4)
+	for i, ln := range lines {
+		w := ansi.StringWidth(ln)
+		widths[i] = w
+		counts[w]++
+	}
+	modal, modalCount := 0, 0
+	for w, n := range counts {
+		if n > modalCount {
+			modal, modalCount = w, n
+		}
+	}
+	if modalCount == len(lines) {
+		return
+	}
+	for i, w := range widths {
+		if w == modal {
+			continue
+		}
+		plain := ansi.Strip(lines[i])
+		if len(plain) > 200 {
+			plain = plain[:200] + "..."
+		}
+		// Dump full raw bytes (including ANSI) so we can inspect exactly
+		// what the line contains. Limit to 600 bytes to keep log readable.
+		raw := lines[i]
+		if len(raw) > 600 {
+			raw = raw[:600] + "...<truncated>"
+		}
+		debuglog.General("[emoji-width] stage=%s modal=%d line=%d visW=%d diff=%+d plain=%q",
+			stage, modal, i, w, w-modal, plain)
+		debuglog.General("[emoji-width-raw] stage=%s line=%d raw=%q",
+			stage, i, raw)
+	}
+}
+
 type cacheStyles struct {
 	borderFill   lipgloss.Style
 	borderInvis  lipgloss.Style
@@ -1632,7 +1679,23 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 			// base emoji at a well-known width. Skin-toned glyphs render
 			// inconsistently across terminals and tend to break border
 			// alignment regardless of how we measure them.
-			emojiStr := emoji.Sprint(":" + emojiutil.StripSkinTone(r.Emoji) + ":")
+			//
+			// Resolve the shortcode to Unicode and check whether the
+			// resolved form is composition-safe. Multi-codepoint
+			// sequences (ZWJ flags, regional-indicator flag pairs,
+			// any residual skin-tone modifiers) render as broken
+			// glyphs in many terminal fonts and break right-border
+			// alignment; in those cases we display the readable
+			// :shortcode: text instead. See
+			// internal/emoji/shouldrender.go for the rule.
+			nameForLookup := emojiutil.StripSkinTone(r.Emoji)
+			resolved := kyoemoji.Sprint(":" + nameForLookup + ":")
+			var emojiStr string
+			if emojiutil.ShouldRenderUnicode(resolved) {
+				emojiStr = resolved
+			} else {
+				emojiStr = ":" + nameForLookup + ":"
+			}
 			pillText := fmt.Sprintf("%s%d", emojiStr, r.Count)
 			var style lipgloss.Style
 			if isSelected && m.reactionNavActive && i == m.reactionNavIndex {
@@ -2678,11 +2741,21 @@ func (m *Model) View(height, width int) string {
 		visible = m.applySelectionOverlay(visible, overrodeFirst, overrodeLast)
 	}
 
+	// TEMP debug instrumentation (#emoji-width-investigation): check
+	// per-stage width consistency. Modal-width assertion: log any line
+	// whose width differs from the majority.
+	debugCheckModal("messages.View:pre-selectionOverlay", visible)
+
+	// (selection overlay already applied above; re-check after it)
+	debugCheckModal("messages.View:post-selectionOverlay", visible)
+
 	// Overlay a 1-col scrollbar on the right of the message area when content
 	// exceeds the visible height. Chrome (header + separator) is left alone
 	// since it does not scroll.
 	visible = scrollbar.Overlay(visible, width, m.totalLines, m.yOffset, msgAreaHeight,
 		styles.Background, styles.Border, styles.Primary)
+
+	debugCheckModal("messages.View:post-scrollbar", visible)
 
 	return chrome + "\n" + strings.Join(visible, "\n")
 }
