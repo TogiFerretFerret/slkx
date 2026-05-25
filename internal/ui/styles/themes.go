@@ -281,18 +281,30 @@ var builtinThemes = map[string]struct {
 	// Values are passed through lipgloss.Color() which returns
 	// ansi.BasicColor, so rendering uses native 16-color SGR escapes
 	// and inherits the user's terminal palette.
+	//
+	// SelectionBgFocused / SelectionBgUnfocused are set explicitly to
+	// ANSI 8 (bright black / palette gray) to bypass mixColors. With
+	// Background=ANSI 0 the default mix produces a near-black RGB
+	// tint (~RGB(0,25,25)) that's invisible against the terminal bg.
 	"ansi dark": {"ANSI Dark", ThemeColors{
 		Primary: "4", Accent: "6", Warning: "3", Error: "1",
 		Background: "0", Surface: "8", SurfaceDark: "0",
 		Text: "15", TextMuted: "8", Border: "8",
+		SelectionBgFocused: "8", SelectionBgUnfocused: "8",
 	}},
 	// ansi-light is the light-terminal counterpart to ansi-dark. Same
 	// ANSI-16-only constraint; values chosen for readability on light
 	// terminal backgrounds.
+	//
+	// SelectionBgFocused / SelectionBgUnfocused use ANSI 8 (bright
+	// black / palette gray) for the same reason as ansi-dark — bypass
+	// mixColors so the selection tint is palette-inherited and
+	// visible against the light terminal background.
 	"ansi light": {"ANSI Light", ThemeColors{
 		Primary: "4", Accent: "6", Warning: "3", Error: "1",
 		Background: "15", Surface: "7", SurfaceDark: "7",
 		Text: "0", TextMuted: "8", Border: "8",
+		SelectionBgFocused: "8", SelectionBgUnfocused: "8",
 	}},
 }
 

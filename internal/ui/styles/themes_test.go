@@ -249,3 +249,39 @@ func TestANSIThemeLookupViaDisplayName(t *testing.T) {
 		t.Errorf("lookupTheme(\"ANSI Light\").Background = %q, want \"15\" — likely fell through to default \"dark\" theme", light.Background)
 	}
 }
+
+// TestANSIThemesSelectionTintPaletteInherited regression-pins that
+// SelectionTintColor for the ANSI themes returns a palette-inherited
+// ansi.BasicColor — not a near-black RGB mix from the default
+// mixColors(Accent, Background=ANSI 0, 0.15) path.
+//
+// Without explicit SelectionBgFocused/SelectionBgUnfocused on the
+// theme, ansi-dark's selection tint computes to roughly RGB(0,25,25)
+// which renders as effectively black against any dark terminal bg.
+// The fix sets the optional theme fields to a palette ANSI color
+// ("8" = bright black / gray) so the tint is visible and tracks
+// the user's terminal palette.
+func TestANSIThemesSelectionTintPaletteInherited(t *testing.T) {
+	cases := []struct {
+		theme string
+	}{
+		{"ansi dark"},
+		{"ansi light"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.theme, func(t *testing.T) {
+			Apply(tc.theme, config.Theme{})
+			t.Cleanup(func() { Apply("dark", config.Theme{}) })
+
+			focused := SelectionTintColor(true)
+			if _, ok := focused.(ansi.BasicColor); !ok {
+				t.Errorf("%s focused selection tint = %T, want ansi.BasicColor (palette-inherited)", tc.theme, focused)
+			}
+
+			unfocused := SelectionTintColor(false)
+			if _, ok := unfocused.(ansi.BasicColor); !ok {
+				t.Errorf("%s unfocused selection tint = %T, want ansi.BasicColor (palette-inherited)", tc.theme, unfocused)
+			}
+		})
+	}
+}
