@@ -146,6 +146,7 @@ type mockSlackAPI struct {
 	getDNDInfoContextFn             func(ctx context.Context, user *string, options ...slack.ParamOption) (*slack.DNDStatus, error)
 	uploadFileContextFn             func(ctx context.Context, params slack.UploadFileParameters) (*slack.FileSummary, error)
 	getUsersInConversationContextFn func(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
+	openConversationContextFn       func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error)
 }
 
 func (m *mockSlackAPI) GetConversations(params *slack.GetConversationsParameters) ([]slack.Channel, string, error) {
@@ -1898,5 +1899,146 @@ func TestGetUsersInConversationRetriesOnRateLimit(t *testing.T) {
 	// On rate-limit, cursor must NOT advance — the retry hits the same page.
 	if seenCursors[0] != "" || seenCursors[1] != "" {
 		t.Errorf("expected both calls with empty cursor (same page retry), got %v", seenCursors)
+	}
+}
+
+func (m *mockSlackAPI) OpenConversationContext(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error) {
+	if m.openConversationContextFn != nil {
+		return m.openConversationContextFn(ctx, params)
+	}
+	return nil, false, false, nil
+}
+
+func TestOpenConversation_SingleUserReturnsIMChannelID(t *testing.T) {
+	mock := &mockSlackAPI{
+		openConversationContextFn: func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error) {
+			if len(params.Users) != 1 || params.Users[0] != "U123" {
+				t.Errorf("expected Users=[U123], got %v", params.Users)
+			}
+			if !params.ReturnIM {
+				t.Error("expected ReturnIM=true")
+			}
+			return &slack.Channel{
+				GroupConversation: slack.GroupConversation{
+					Conversation: slack.Conversation{ID: "D456"},
+				},
+			}, false, false, nil
+		},
+	}
+	c := &Client{api: mock}
+
+	channelID, alreadyOpen, err := c.OpenConversation(context.Background(), []string{"U123"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if channelID != "D456" {
+		t.Errorf("expected channelID=D456, got %q", channelID)
+	}
+	if alreadyOpen {
+		t.Error("expected alreadyOpen=false")
+	}
+}
+
+func TestOpenConversation_MultipleUsersReturnsMPIMChannelID(t *testing.T) {
+	mock := &mockSlackAPI{
+		openConversationContextFn: func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error) {
+			if len(params.Users) != 3 {
+				t.Errorf("expected 3 users, got %d", len(params.Users))
+			}
+			return &slack.Channel{
+				GroupConversation: slack.GroupConversation{
+					Conversation: slack.Conversation{ID: "G789"},
+				},
+			}, false, false, nil
+		},
+	}
+	c := &Client{api: mock}
+
+	channelID, _, err := c.OpenConversation(context.Background(), []string{"U1", "U2", "U3"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if channelID != "G789" {
+		t.Errorf("expected channelID=G789, got %q", channelID)
+	}
+}
+
+func TestOpenConversation_EmptyUserIDsReturnsErrorWithoutAPICall(t *testing.T) {
+	called := false
+	mock := &mockSlackAPI{
+		openConversationContextFn: func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error) {
+			called = true
+			return nil, false, false, nil
+		},
+	}
+	c := &Client{api: mock}
+
+	_, _, err := c.OpenConversation(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for empty userIDs")
+	}
+	if called {
+		t.Error("API should not have been called")
+	}
+}
+
+func TestOpenConversation_TooManyUserIDsReturnsErrorWithoutAPICall(t *testing.T) {
+	called := false
+	mock := &mockSlackAPI{
+		openConversationContextFn: func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error) {
+			called = true
+			return nil, false, false, nil
+		},
+	}
+	c := &Client{api: mock}
+
+	nine := []string{"U1", "U2", "U3", "U4", "U5", "U6", "U7", "U8", "U9"}
+	_, _, err := c.OpenConversation(context.Background(), nine)
+	if err == nil {
+		t.Fatal("expected error for 9 userIDs")
+	}
+	if called {
+		t.Error("API should not have been called")
+	}
+}
+
+func TestOpenConversation_APIErrorIsWrapped(t *testing.T) {
+	mock := &mockSlackAPI{
+		openConversationContextFn: func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error) {
+			return nil, false, false, fmt.Errorf("rate_limited")
+		},
+	}
+	c := &Client{api: mock}
+
+	_, _, err := c.OpenConversation(context.Background(), []string{"U1"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "OpenConversation") {
+		t.Errorf("expected error to be wrapped with OpenConversation prefix, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "rate_limited") {
+		t.Errorf("expected error to contain underlying message, got %q", err.Error())
+	}
+}
+
+func TestOpenConversation_AlreadyOpenFlagPropagates(t *testing.T) {
+	mock := &mockSlackAPI{
+		openConversationContextFn: func(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error) {
+			return &slack.Channel{
+				GroupConversation: slack.GroupConversation{
+					Conversation: slack.Conversation{ID: "D1"},
+				},
+			}, false, true, nil
+		},
+	}
+	c := &Client{api: mock}
+
+	_, alreadyOpen, err := c.OpenConversation(context.Background(), []string{"U1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !alreadyOpen {
+		t.Error("expected alreadyOpen=true")
 	}
 }

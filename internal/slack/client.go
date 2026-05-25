@@ -44,6 +44,7 @@ type SlackAPI interface {
 	EndDNDContext(ctx context.Context) error
 	GetDNDInfoContext(ctx context.Context, user *string, options ...slack.ParamOption) (*slack.DNDStatus, error)
 	UploadFileContext(ctx context.Context, params slack.UploadFileParameters) (*slack.FileSummary, error)
+	OpenConversationContext(ctx context.Context, params *slack.OpenConversationParameters) (*slack.Channel, bool, bool, error)
 }
 
 // defaultAPIBaseURL is the canonical Slack Web API root used as a fallback
@@ -637,6 +638,30 @@ func (c *Client) SendMessage(ctx context.Context, channelID, text string) (strin
 		return "", "", fmt.Errorf("sending message: %w", err)
 	}
 	return ts, mr, nil
+}
+
+// OpenConversation opens (or returns) a direct message channel (1 user)
+// or a multi-person direct message / MPIM (2-8 users). Idempotent:
+// when the conversation already exists, Slack returns it with
+// alreadyOpen=true.
+//
+// Defends inputs: rejects 0 users or more than 8. Slack's hard cap on
+// MPIM size is 9 participants total, so up to 8 OTHER user IDs.
+func (c *Client) OpenConversation(ctx context.Context, userIDs []string) (channelID string, alreadyOpen bool, err error) {
+	if len(userIDs) == 0 {
+		return "", false, fmt.Errorf("OpenConversation: at least one user ID required")
+	}
+	if len(userIDs) > 8 {
+		return "", false, fmt.Errorf("OpenConversation: at most 8 user IDs allowed (got %d)", len(userIDs))
+	}
+	ch, _, alreadyOpen, err := c.api.OpenConversationContext(ctx, &slack.OpenConversationParameters{
+		Users:    userIDs,
+		ReturnIM: true,
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("OpenConversation: %w", err)
+	}
+	return ch.ID, alreadyOpen, nil
 }
 
 // UploadFile uploads a single file to a channel (and optional thread)
