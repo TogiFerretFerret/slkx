@@ -63,18 +63,37 @@ func TestReducer_NewMessageOpenedMsg_SwitchesChannelAndEntersInsertMode(t *testi
 	if app.newMessagePicker.IsVisible() {
 		t.Error("expected picker closed")
 	}
-	// The reducer should emit a ChannelSelectedMsg.
+	// The reducer should emit a ChannelSelectedMsg (batched with
+	// a compose-focus cmd).
 	if cmd == nil {
 		t.Fatal("expected a tea.Cmd that fires ChannelSelectedMsg")
 	}
-	msg := cmd()
-	sel, ok := msg.(ChannelSelectedMsg)
+	sel, ok := findChannelSelected(cmd())
 	if !ok {
-		t.Fatalf("expected ChannelSelectedMsg, got %T", msg)
+		t.Fatalf("expected ChannelSelectedMsg in batch, got %T", cmd())
 	}
 	if sel.ID != "D123" {
 		t.Errorf("expected ChannelID=D123, got %s", sel.ID)
 	}
+}
+
+// findChannelSelected walks a tea.Cmd result (which may be a
+// tea.BatchMsg) and returns the first ChannelSelectedMsg it finds.
+func findChannelSelected(msg tea.Msg) (ChannelSelectedMsg, bool) {
+	if sel, ok := msg.(ChannelSelectedMsg); ok {
+		return sel, true
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			if c == nil {
+				continue
+			}
+			if sel, ok := findChannelSelected(c()); ok {
+				return sel, true
+			}
+		}
+	}
+	return ChannelSelectedMsg{}, false
 }
 
 func TestReducer_NewMessageOpenedMsg_DroppedWhenCancelled(t *testing.T) {
@@ -270,11 +289,11 @@ func TestEndToEnd_CtrlN_SelectUser_Enter_OpensDM(t *testing.T) {
 		t.Error("step 5: expected picker hidden")
 	}
 
-	// 6. The cmd should emit ChannelSelectedMsg{ID: D123, Type: dm}.
-	msg := cmd()
-	sel, ok := msg.(ChannelSelectedMsg)
+	// 6. The cmd should emit ChannelSelectedMsg{ID: D123, Type: dm}
+	// (batched with a compose-focus cmd).
+	sel, ok := findChannelSelected(cmd())
 	if !ok {
-		t.Fatalf("step 6: expected ChannelSelectedMsg, got %T", msg)
+		t.Fatalf("step 6: expected ChannelSelectedMsg in batch, got %T", cmd())
 	}
 	if sel.ID != "D123" || sel.Type != "dm" {
 		t.Errorf("step 6: want {D123, dm}, got {%s, %s}", sel.ID, sel.Type)

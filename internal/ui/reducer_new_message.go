@@ -61,9 +61,10 @@ var reduceNewMessagePicker reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, boo
 		}
 
 		channelID := m.ChannelID
-		return func() tea.Msg {
+		emitSelected := func() tea.Msg {
 			return ChannelSelectedMsg{ID: channelID, Type: channelType}
-		}, true
+		}
+		return tea.Batch(emitSelected, a.compose.Focus()), true
 
 	case NewMessageFailedMsg:
 		if !newMessageResultIsCurrent(a, m.RequestID) {

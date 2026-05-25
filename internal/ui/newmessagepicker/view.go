@@ -205,10 +205,13 @@ func (m Model) renderRow(u User, width int, highlight bool, bg color.Color) stri
 		name += " [ext]"
 	}
 
-	handle := lipgloss.NewStyle().
-		Background(bg).
-		Foreground(styles.TextMuted).
-		Render(" @" + u.Username)
+	handle := ""
+	if u.Username != "" && u.Username != u.DisplayName {
+		handle = lipgloss.NewStyle().
+			Background(bg).
+			Foreground(styles.TextMuted).
+			Render(" @" + u.Username)
+	}
 
 	var nameStyle lipgloss.Style
 	if highlight {
