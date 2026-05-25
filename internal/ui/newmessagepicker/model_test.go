@@ -381,3 +381,82 @@ func TestHandleKey_BackspaceAtEmptyQueryRemovesLastPill(t *testing.T) {
 		t.Error("expected U1 still selected")
 	}
 }
+
+func TestHandleKey_EnterWithPillsReturnsPillIDs(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey(" ")    // select Alice (U1)
+	m.HandleKey("down") // highlight Bob
+	m.HandleKey(" ")    // select Bob (U2)
+
+	res := m.HandleKey("enter")
+	if res == nil {
+		t.Fatal("expected non-nil result from Enter with pills")
+	}
+	if len(res.UserIDs) != 2 {
+		t.Fatalf("expected 2 user IDs, got %d", len(res.UserIDs))
+	}
+	// Order within UserIDs is not guaranteed by the spec; check set membership.
+	got := map[string]bool{}
+	for _, id := range res.UserIDs {
+		got[id] = true
+	}
+	if !got["U1"] || !got["U2"] {
+		t.Errorf("expected {U1, U2}, got %v", res.UserIDs)
+	}
+}
+
+func TestHandleKey_EnterWithoutPillsUsesHighlight(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey("down") // highlight Bob (U2)
+
+	res := m.HandleKey("enter")
+	if res == nil {
+		t.Fatal("expected non-nil result from Enter with highlight")
+	}
+	if len(res.UserIDs) != 1 || res.UserIDs[0] != "U2" {
+		t.Errorf("expected [U2], got %v", res.UserIDs)
+	}
+}
+
+func TestHandleKey_EnterWithNoHighlightAndNoPillsReturnsNil(t *testing.T) {
+	m := New()
+	m.SetUsers(nil) // no users -> filtered is empty
+	m.Open()
+
+	res := m.HandleKey("enter")
+	if res != nil {
+		t.Errorf("expected nil result when nothing to submit, got %+v", res)
+	}
+}
+
+func TestHandleKey_EnterWithEmptyFilteredButPillsStillSubmits(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	m.HandleKey(" ")     // select Alice
+	m.setQuery("xyzqq") // filter to nothing
+	res := m.HandleKey("enter")
+	if res == nil || len(res.UserIDs) != 1 || res.UserIDs[0] != "U1" {
+		t.Errorf("expected pills to submit even with empty filter, got %+v", res)
+	}
+}
+
+func TestHandleKey_EscClosesPickerAndReturnsNil(t *testing.T) {
+	m := New()
+	m.SetUsers(testUsers())
+	m.Open()
+	if !m.IsVisible() {
+		t.Fatal("precondition: picker should be visible")
+	}
+	res := m.HandleKey("esc")
+	if res != nil {
+		t.Errorf("expected nil result from Esc, got %+v", res)
+	}
+	if m.IsVisible() {
+		t.Error("expected picker to be hidden after Esc")
+	}
+}

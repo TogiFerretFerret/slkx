@@ -108,6 +108,11 @@ func (m *Model) setQuery(q string) {
 // lands in this task too; submit semantics (Enter) land in Task 5.
 func (m *Model) HandleKey(keyStr string) *Result {
 	switch keyStr {
+	case "enter":
+		return m.submit()
+	case "esc":
+		m.Close()
+		return nil
 	case "down", "ctrl+n":
 		if m.highlight < len(m.filtered)-1 {
 			m.highlight++
@@ -182,4 +187,28 @@ func (m *Model) handleBackspace() {
 			return
 		}
 	}
+}
+
+// submit returns a non-nil *Result when the picker has something to
+// submit:
+//   - If pills are present, the result carries the pill IDs.
+//   - Otherwise, if a user is highlighted, the result carries that one ID.
+//   - If neither is true (empty filter AND no pills), returns nil — Enter is a no-op.
+//
+// Pill order in the returned slice matches the user-list order so the
+// caller sees a stable, predictable order across calls.
+func (m *Model) submit() *Result {
+	if len(m.selected) > 0 {
+		ids := make([]string, 0, len(m.selected))
+		for _, u := range m.users {
+			if _, ok := m.selected[u.ID]; ok {
+				ids = append(ids, u.ID)
+			}
+		}
+		return &Result{UserIDs: ids}
+	}
+	if m.highlight < 0 || m.highlight >= len(m.filtered) {
+		return nil
+	}
+	return &Result{UserIDs: []string{m.users[m.filtered[m.highlight]].ID}}
 }
