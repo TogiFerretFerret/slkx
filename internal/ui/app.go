@@ -31,6 +31,7 @@ import (
 	"github.com/gammons/slk/internal/ui/imgrender"
 	"github.com/gammons/slk/internal/ui/mentionpicker"
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/newmessagepicker"
 	"github.com/gammons/slk/internal/ui/presencemenu"
 	"github.com/gammons/slk/internal/ui/reactionpicker"
 	"github.com/gammons/slk/internal/ui/sidebar"
@@ -78,19 +79,20 @@ const openThreadDebounceDelay = 200 * time.Millisecond
 
 type App struct {
 	// Sub-models
-	workspaceRail   workspace.Model
-	sidebar         sidebar.Model
-	messagepane     messages.Model
-	compose         compose.Model
-	statusbar       statusbar.Model
-	channelFinder   channelfinder.Model
-	workspaceFinder workspacefinder.Model
-	themeSwitcher   themeswitcher.Model
-	presenceMenu    presencemenu.Model
-	help            help.Model
-	threadPanel     *thread.Model
-	threadCompose   compose.Model
-	threadsView     threadsview.Model
+	workspaceRail    workspace.Model
+	sidebar          sidebar.Model
+	messagepane      messages.Model
+	compose          compose.Model
+	statusbar        statusbar.Model
+	channelFinder    channelfinder.Model
+	newMessagePicker newmessagepicker.Model
+	workspaceFinder  workspacefinder.Model
+	themeSwitcher    themeswitcher.Model
+	presenceMenu     presencemenu.Model
+	help             help.Model
+	threadPanel      *thread.Model
+	threadCompose    compose.Model
+	threadsView      threadsview.Model
 
 	// State
 	mode           Mode
@@ -196,6 +198,17 @@ type App struct {
 	// internal/ui/edit.go.
 	editing *editController
 
+	// newMessageInFlightID is the monotonic counter for in-flight
+	// OpenConversation requests dispatched from the new-message
+	// picker. 0 means no submit is in flight. The reducer drops late
+	// results whose RequestID doesn't match.
+	newMessageInFlightID uint64
+	// newMessageCancelled is set to true when the user Escs the
+	// modal while a submit is in flight. A subsequent
+	// NewMessageOpenedMsg with the matching RequestID is dropped
+	// rather than switching channels behind the user's back.
+	newMessageCancelled bool
+
 	// Workspace switching
 	workspaceSwitcher SwitchWorkspaceFunc
 	workspaceItems    []workspace.WorkspaceItem // cached for lookup
@@ -294,6 +307,7 @@ func NewApp() *App {
 		compose:              compose.New(""),
 		statusbar:            statusbar.New(),
 		channelFinder:        channelfinder.New(),
+		newMessagePicker:     newmessagepicker.New(),
 		workspaceFinder:      workspacefinder.New(),
 		themeSwitcher:        themeswitcher.New(),
 		presenceMenu:         presencemenu.New(),
@@ -393,6 +407,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		reduceSend,
 		reduceChannels,
 		reduceWorkspace,
+		reduceNewMessagePicker,
 		reduceIO,
 		reduceMouse,
 	); handled {
@@ -1628,6 +1643,41 @@ func (a *App) SetUserNames(names map[string]string) {
 	}
 	a.compose.SetUsers(users)
 	a.threadCompose.SetUsers(users)
+}
+
+// seedNewMessagePicker snapshots the current workspace's user list
+// into the new-message picker and configures the self-exclusion.
+// Called when ModeNewMessage is entered so the modal always sees a
+// fresh view of the workspace.
+//
+// User-list shape:
+//   - DisplayName from a.userNames (the workspace display name map).
+//   - Username falls back to DisplayName — there is no separate
+//     userID->handle map on App today. The picker uses Username
+//     only for filter matching, so this fallback degrades
+//     gracefully: queries against the display name still hit.
+//   - IsExternal from a.externalUsers.
+//   - Recency is left at 0 (alphabetical order; recency wiring is a
+//     follow-up that needs WorkspaceContext.LastVisitedByChannel
+//     plumbed in).
+//   - Self (a.currentUserID) is excluded both at slice-build time
+//     and via SetCurrentUserID (belt-and-suspenders).
+func (a *App) seedNewMessagePicker() {
+	users := make([]newmessagepicker.User, 0, len(a.userNames))
+	for id, name := range a.userNames {
+		if id == a.currentUserID {
+			continue
+		}
+		users = append(users, newmessagepicker.User{
+			ID:          id,
+			DisplayName: name,
+			Username:    name, // see scoping note; replaceable when a handle map lands
+			IsExternal:  a.externalUsers[id],
+		})
+	}
+
+	a.newMessagePicker.SetCurrentUserID(a.currentUserID)
+	a.newMessagePicker.SetUsers(users)
 }
 
 // SetExternalUsers replaces the set of user IDs known to be Slack

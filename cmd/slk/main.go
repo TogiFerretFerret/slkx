@@ -917,6 +917,33 @@ func run() error {
 				// off the Update goroutine.
 				wctx.Membership.EnsureFresh(context.Background(), string(channelID))
 			},
+			OpenConversation: func(userIDs []string, requestID uint64) tea.Cmd {
+				wctx := router.Active()
+				if wctx == nil {
+					return func() tea.Msg {
+						return ui.NewMessageFailedMsg{
+							RequestID: requestID,
+							Err:       fmt.Errorf("no active workspace"),
+						}
+					}
+				}
+				client := wctx.Client
+				return func() tea.Msg {
+					channelID, alreadyOpen, err := client.OpenConversation(ctx, userIDs)
+					if err != nil {
+						return ui.NewMessageFailedMsg{
+							RequestID: requestID,
+							Err:       err,
+						}
+					}
+					return ui.NewMessageOpenedMsg{
+						ChannelID:   channelID,
+						AlreadyOpen: alreadyOpen,
+						UserIDs:     userIDs,
+						RequestID:   requestID,
+					}
+				}
+			},
 			Fetch: func(channelID ids.ChannelID, channelName string) tea.Msg {
 				chIDStr := string(channelID)
 				wctx := router.Active()

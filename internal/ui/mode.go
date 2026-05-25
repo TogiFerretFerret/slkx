@@ -16,6 +16,7 @@ const (
 	ModePresenceCustomSnooze
 	ModeConfirm
 	ModeHelp
+	ModeNewMessage
 )
 
 func (m Mode) String() string {
@@ -44,6 +45,8 @@ func (m Mode) String() string {
 		return "CONFIRM"
 	case ModeHelp:
 		return "HELP"
+	case ModeNewMessage:
+		return "NEW MSG"
 	default:
 		return "UNKNOWN"
 	}

@@ -40,6 +40,9 @@ func (a *App) applyOverlays(screen string) string {
 	if a.channelFinder.IsVisible() {
 		screen = a.channelFinder.ViewOverlay(a.width, a.height, screen)
 	}
+	if a.newMessagePicker.IsVisible() {
+		screen = a.newMessagePicker.ViewOverlay(a.width, a.height, screen)
+	}
 	if a.reactionPicker.IsVisible() {
 		screen = a.reactionPicker.ViewOverlay(a.width, a.height, screen)
 	}
@@ -73,6 +76,7 @@ func (a *App) applyOverlays(screen string) string {
 // re-wrap is needed.
 func (a *App) overlayActive() bool {
 	return a.channelFinder.IsVisible() ||
+		a.newMessagePicker.IsVisible() ||
 		a.reactionPicker.IsVisible() ||
 		a.confirmPrompt.IsVisible() ||
 		a.workspaceFinder.IsVisible() ||

@@ -483,3 +483,38 @@ type previewSpinnerTickMsg struct{}
 // editEmptyToastMsg is delivered when the user tries to submit an
 // edit with empty text.
 type editEmptyToastMsg struct{}
+
+// EnterNewMessageMsg is dispatched when the user presses Ctrl+N in
+// ModeNormal. The reducer (reduceNewMessagePicker) handles it by snapshotting
+// the workspace user list, opening the newmessagepicker, and switching
+// to ModeNewMessage.
+type EnterNewMessageMsg struct{}
+
+// NewMessageOpenedMsg carries the result of a successful
+// ChannelService.OpenConversation call. RequestID identifies which
+// submit this is the response to so the reducer can drop late
+// arrivals from cancelled submits. AlreadyOpen=true means Slack
+// returned an existing DM/MPIM; the reducer skips the
+// minimal-channel-record insert in that case (Task 12).
+//
+// Distinct from the existing ConversationOpenedMsg in this file,
+// which is dispatched by the WS event handler for Slack's
+// mpim_open / im_created events (channel side-effect of someone
+// being added to a conversation). The new-message flow has its own
+// type because it carries the in-flight RequestID and we need
+// per-message routing in reduceNewMessagePicker.
+type NewMessageOpenedMsg struct {
+	ChannelID   string
+	AlreadyOpen bool
+	UserIDs     []string // copied through so the reducer can hydrate the cache record
+	RequestID   uint64
+}
+
+// NewMessageFailedMsg carries an error from a failed
+// ChannelService.OpenConversation call. The reducer surfaces Err in
+// the modal's footer banner; the modal stays open with the user's
+// selection intact so they can retry.
+type NewMessageFailedMsg struct {
+	RequestID uint64
+	Err       error
+}

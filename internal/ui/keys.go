@@ -36,6 +36,7 @@ type KeyMap struct {
 	OpenPreview         key.Binding
 	MarkUnread          key.Binding
 	WorkspaceFinder     key.Binding
+	NewMessage          key.Binding
 	ThemeSwitcher       key.Binding
 	ThemeSwitcherGlobal key.Binding
 	PresenceMenu        key.Binding
@@ -79,6 +80,7 @@ func DefaultKeyMap() KeyMap {
 		OpenPreview:         key.NewBinding(key.WithKeys("O", "v"), key.WithHelp("O/v", "open image preview")),
 		MarkUnread:          key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "mark unread")),
 		WorkspaceFinder:     key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "switch workspace")),
+		NewMessage:          key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "new message")),
 		ThemeSwitcher:       key.NewBinding(key.WithKeys("ctrl+y"), key.WithHelp("ctrl+y", "switch theme (per workspace)")),
 		ThemeSwitcherGlobal: key.NewBinding(key.WithKeys("ctrl+shift+y"), key.WithHelp("ctrl+shift+y", "set default theme")),
 		PresenceMenu:        key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "set status")),
