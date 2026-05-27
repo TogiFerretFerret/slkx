@@ -44,6 +44,7 @@ type KeyMap struct {
 	NavBack             key.Binding
 	NavForward          key.Binding
 	Help                key.Binding
+	SaveThread          key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -88,5 +89,6 @@ func DefaultKeyMap() KeyMap {
 		NavBack:             key.NewBinding(key.WithKeys("ctrl+h"), key.WithHelp("ctrl+h", "navigate back")),
 		NavForward:          key.NewBinding(key.WithKeys("ctrl+k"), key.WithHelp("ctrl+k", "navigate forward")),
 		Help:                key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "show keybindings")),
+		SaveThread:          key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "save thread")),
 	}
 }

@@ -384,3 +384,9 @@ type MarkedUnreadMsg struct{}
 // setting the toast to "Mark unread failed" and scheduling a
 // CopiedClearMsg.
 type MarkUnreadFailedMsg struct{ Reason string }
+
+// ThreadSavedMsg is delivered when a thread has been saved to a markdown file.
+type ThreadSavedMsg struct{ Path string }
+
+// ThreadSaveFailedMsg is delivered when saving a thread to file fails.
+type ThreadSaveFailedMsg struct{ Reason string }

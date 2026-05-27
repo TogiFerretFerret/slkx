@@ -49,6 +49,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -113,6 +114,12 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 
 	case statusbar.MarkUnreadFailedMsg:
 		return toastWithClear(a, "Mark unread failed: "+truncateReason(m.Reason, 40), 3*time.Second), true
+
+	case statusbar.ThreadSavedMsg:
+		return toastWithClear(a, "Saved "+filepath.Base(m.Path), 2*time.Second), true
+
+	case statusbar.ThreadSaveFailedMsg:
+		return toastWithClear(a, "Save failed: "+truncateReason(m.Reason, 40), 3*time.Second), true
 
 	case statusbar.EditFailedMsg:
 		return toastWithClear(a, "Edit failed: "+truncateReason(m.Reason, 40), 3*time.Second), true

@@ -452,6 +452,117 @@ func TestEscapedAngleBracketsNotMistakenForMention(t *testing.T) {
 	}
 }
 
+// --- SlackMrkdwnToCommonMark tests ---
+
+func TestCommonMark_Bold(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("hello *world*", nil, nil)
+	if got != "hello **world**" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_Strikethrough(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("~removed~", nil, nil)
+	if got != "~~removed~~" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_LabeledLink(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("<https://example.com|docs>", nil, nil)
+	if got != "[docs](https://example.com)" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_BareLink(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("<https://example.com>", nil, nil)
+	if got != "https://example.com" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_MailtoStripsScheme(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("<mailto:a@b.com>", nil, nil)
+	if got != "a@b.com" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_UserMention(t *testing.T) {
+	names := map[string]string{"U123": "alice"}
+	got := SlackMrkdwnToCommonMark("hi <@U123>", names, nil)
+	if got != "hi @alice" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_ChannelMention(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("<#C456|general>", nil, nil)
+	if got != "#general" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_EntityDecode(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("a &amp; b &lt; c &gt; d", nil, nil)
+	if got != "a & b < c > d" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_InlineCodePreserved(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("use `*foo*`", nil, nil)
+	if got != "use `*foo*`" {
+		t.Errorf("got %q, want bold NOT applied inside backticks", got)
+	}
+}
+
+func TestCommonMark_CodeBlockPreserved(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("```*bold* ~strike~```", nil, nil)
+	want := "```\n*bold* ~strike~\n```"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestCommonMark_IntraWordUnderscoreUntouched(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("is_unpaid_yes", nil, nil)
+	if got != "is_unpaid_yes" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCommonMark_EmojiInInlineCodePreserved(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("see `:smile:` here", nil, nil)
+	if got != "see `:smile:` here" {
+		t.Errorf("got %q, want emoji shortcode preserved inside backticks", got)
+	}
+}
+
+func TestCommonMark_EmojiInCodeBlockPreserved(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("```\n:smile:\n```", nil, nil)
+	want := "```\n:smile:\n```"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestCommonMark_EmojiNoTrailingSpace(t *testing.T) {
+	got := SlackMrkdwnToCommonMark(":smile:end", nil, nil)
+	want := "😄end"
+	if got != want {
+		t.Errorf("got %q, want %q (no trailing space between emoji and adjacent text)", got, want)
+	}
+}
+
+func TestCommonMark_Blockquote(t *testing.T) {
+	got := SlackMrkdwnToCommonMark("&gt; quoted text", nil, nil)
+	if got != "> quoted text" {
+		t.Errorf("got %q", got)
+	}
+}
+
 func TestRenderEmojiTokensInline_ImageModeOff(t *testing.T) {
 	// With image mode off, the helper returns the literal text of
 	// each token verbatim — including the :name: form of unresolved

@@ -491,6 +491,12 @@ func (m *Model) Replies() []messages.MessageItem {
 	return m.replies
 }
 
+// UserNames returns the user-ID-to-display-name map used for rendering mentions.
+func (m *Model) UserNames() map[string]string { return m.userNames }
+
+// ChannelNames returns the channel-ID-to-name map used for rendering channel mentions.
+func (m *Model) ChannelNames() map[string]string { return m.channelNames }
+
 // UpdateMessageInPlace finds a reply by TS and replaces its text,
 // marking it edited. Returns true if found.
 func (m *Model) UpdateMessageInPlace(ts, newText string) bool {
