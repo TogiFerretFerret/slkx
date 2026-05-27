@@ -34,19 +34,33 @@ func Width(s string) int {
 		return lipgloss.Width(stripped)
 	}
 
+	// Image-mode fast path: for every grapheme cluster known to render
+	// as an emoji image, return the configured cell footprint (typically
+	// 2) instead of consulting the probe map or lipgloss. This bypass
+	// is what retires the per-terminal alignment-drift bug — we report
+	// a width we know the kitty renderer will deliver exactly.
+	imageActive := ImageModeActive()
+	imageCells := 0
+	if imageActive {
+		imageCells = ImageModeCells()
+	}
+
 	widthMu.RLock()
 	cached := widthMap
 	widthMu.RUnlock()
 
-	if len(cached) == 0 {
+	if !imageActive && len(cached) == 0 {
 		return lipgloss.Width(stripped)
 	}
 
-	// Segment by grapheme cluster, look up each.
 	total := 0
 	gr := uniseg.NewGraphemes(stripped)
 	for gr.Next() {
 		cluster := gr.Str()
+		if imageActive && isKnownEmojiCluster(cluster) {
+			total += imageCells
+			continue
+		}
 		if w, ok := cached[cluster]; ok {
 			total += w
 		} else {

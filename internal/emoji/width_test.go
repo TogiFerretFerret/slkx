@@ -92,3 +92,84 @@ func TestIsCalibrated(t *testing.T) {
 		t.Error("IsCalibrated should be true after setWidthMap")
 	}
 }
+
+func TestWidth_ImageMode_KnownEmojiClusters(t *testing.T) {
+	resetImageMode()
+	resetWidthMap()
+	t.Cleanup(func() {
+		resetImageMode()
+		resetWidthMap()
+	})
+
+	SetImageMode(true, 2)
+
+	cases := []struct {
+		name string
+		in   string
+		want int
+	}{
+		// Each single emoji reports the image-mode footprint (2 cells).
+		{"single thumb", "\U0001F44D", 2},
+		{"VS16 sequence", "\u2764\uFE0F", 2},
+		{"ZWJ sequence", "\U0001F468\u200D\U0001F680", 2},
+		{"regional indicator pair", "\U0001F1FA\U0001F1F8", 2},
+
+		// Mixed text + emoji: emoji = 2, plus the ASCII run.
+		{"text + emoji", "hi \U0001F44D", 5}, // "hi " (3) + emoji (2)
+		{"emoji + text", "\U0001F44D hi", 5}, // emoji (2) + " hi" (3)
+
+		// Two adjacent emoji.
+		{"emoji + emoji", "\U0001F44D\u2764\uFE0F", 4},
+
+		// Pure ASCII: probe-map / lipgloss path unchanged.
+		{"ascii only", "hello", 5},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Width(c.in)
+			if got != c.want {
+				t.Errorf("Width(%q) = %d, want %d", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestWidth_ImageMode_OneCellOverride(t *testing.T) {
+	resetImageMode()
+	resetWidthMap()
+	t.Cleanup(func() {
+		resetImageMode()
+		resetWidthMap()
+	})
+
+	SetImageMode(true, 1)
+	if got := Width("\U0001F44D"); got != 1 {
+		t.Errorf("Width(thumb) with cells=1 = %d, want 1", got)
+	}
+	if got := Width("hi \U0001F44D"); got != 4 {
+		t.Errorf("Width('hi ' + thumb) with cells=1 = %d, want 4 ('hi ' + 1)", got)
+	}
+}
+
+func TestWidth_ImageMode_InactiveFallsThrough(t *testing.T) {
+	resetImageMode()
+	resetWidthMap()
+	t.Cleanup(func() {
+		resetImageMode()
+		resetWidthMap()
+	})
+
+	// Mode is inactive — should NOT force 2-cell width for emoji
+	// clusters; behavior comes from probe map (empty here) or lipgloss
+	// fallback. Confirm by checking ASCII unaffected and emoji uses the
+	// non-image-mode path (which may be != 2, depending on lipgloss).
+	if got := Width("hello"); got != 5 {
+		t.Errorf("Width(ascii) with image-mode off = %d, want 5", got)
+	}
+	// The exact width for an emoji here is whatever lipgloss reports —
+	// we only assert that ImageModeActive is false so the new branch
+	// is not taken.
+	if ImageModeActive() {
+		t.Fatalf("ImageModeActive() = true after resetImageMode()")
+	}
+}
