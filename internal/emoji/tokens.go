@@ -1,5 +1,10 @@
 package emoji
 
+import (
+	"strings"
+	"unicode/utf8"
+)
+
 // TokenKind discriminates between text and emoji tokens in the
 // output of ResolveEmojiToTokens.
 type TokenKind int
@@ -54,7 +59,31 @@ type Token struct {
 // customs may be nil; nil is treated as an empty workspace
 // (kyokomi-only resolution).
 func ResolveEmojiToTokens(text string, customs map[string]string) []Token {
-	// Implementation lives below; this stub keeps the file
-	// compilable while tests are written incrementally.
-	return []Token{{Kind: TokenText, Text: text}}
+	if text == "" {
+		return nil
+	}
+	var tokens []Token
+	var textBuf strings.Builder
+	flushText := func() {
+		if textBuf.Len() > 0 {
+			tokens = append(tokens, Token{Kind: TokenText, Text: textBuf.String()})
+			textBuf.Reset()
+		}
+	}
+
+	// Linear byte-position walk. At each position we try (a) shortcode
+	// match, (b) emoji-cluster match, then fall through to a single-rune
+	// advance into the running text buffer.
+	i := 0
+	for i < len(text) {
+		// (a) Shortcode pass — implemented in Task 3.5.
+		// (b) Emoji-cluster pass — implemented in Task 3.7.
+
+		// Default: consume one rune into the text buffer.
+		r, sz := utf8.DecodeRuneInString(text[i:])
+		textBuf.WriteRune(r)
+		i += sz
+	}
+	flushText()
+	return tokens
 }
