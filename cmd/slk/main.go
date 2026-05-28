@@ -427,45 +427,6 @@ func main() {
 		}
 	}
 
-	// Emoji width probing: parse flags and call Init before bubbletea starts.
-	skipProbe := false
-	forceProbe := false
-	for _, arg := range os.Args[1:] {
-		switch arg {
-		case "--no-emoji-probe":
-			skipProbe = true
-		case "--probe-emoji":
-			forceProbe = true
-		}
-	}
-
-	probedNow := false
-	probeStart := time.Now()
-	probeOpts := emojiwidth.InitOptions{
-		SkipProbe:  skipProbe,
-		ForceProbe: forceProbe,
-	}
-	if emojiwidth.WillProbe(probeOpts) {
-		fmt.Fprintln(os.Stderr, "Calibrating emoji widths for your terminal (one-time, ~30 seconds)...")
-		probedNow = true
-	}
-
-	if err := emojiwidth.Init(probeOpts); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: emoji width calibration failed: %v\n", err)
-		fmt.Fprintln(os.Stderr, "Falling back to library defaults; some emoji may render with incorrect width.")
-	}
-
-	if probedNow && emojiwidth.IsCalibrated() {
-		cachePath := emojiwidth.CachePath(emojiwidth.IdentifyTerminal())
-		fmt.Fprintf(os.Stderr, "Done in %dms. Cached to %s\n", time.Since(probeStart).Milliseconds(), cachePath)
-	}
-
-	if forceProbe {
-		// --probe-emoji is a diagnostic flag: probe and exit.
-		fmt.Fprintln(os.Stderr, "Probe complete. Exiting.")
-		os.Exit(0)
-	}
-
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
