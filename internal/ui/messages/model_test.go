@@ -1163,7 +1163,7 @@ func TestModel_RenderMessageWithImageEmoji_WarmCache(t *testing.T) {
 	t.Cleanup(func() { emojiutil.SetImageMode(false, 2) })
 
 	thumbURL := emojiutil.CDNBaseURL + "1f44d.png"
-	heartURL := emojiutil.CDNBaseURL + "2764.png"
+	heartURL := emojiutil.CDNBaseURL + "2764-fe0f.png"
 
 	ff := newFakePlaceFetcher() // defined in render_test.go
 	ff.setPrerendered(emojiutil.EmojiCacheKey(thumbURL), stdimage.Pt(2, 1), imgpkg.Render{

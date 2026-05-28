@@ -151,7 +151,7 @@ func TestURLForShortcode(t *testing.T) {
 		{"party_parrot", "https://emoji.slack-edge.com/T01/party_parrot/abc.gif", true},
 
 		// kyokomi-only name.
-		{"heart", CDNBaseURL + "2764.png", true},
+		{"heart", CDNBaseURL + "2764-fe0f.png", true},
 
 		// Unknown.
 		{"never_defined", "", false},

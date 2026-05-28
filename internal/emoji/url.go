@@ -36,28 +36,32 @@ func ensureKyokomiCodeMap() {
 const CDNBaseURL = "https://a.slack-edge.com/production-standard-emoji-assets/16.0/google-small/"
 
 // vs16 is U+FE0F, the variation selector that requests emoji
-// presentation for a base codepoint. Slack web strips it from URL
-// paths (e.g., :heart: at U+2764 U+FE0F serves as "2764.png", not
-// "2764-fe0f.png"). ZWJ (U+200D) sequences and regional-indicator
-// flag pairs are preserved.
+// presentation for a base codepoint. Slack's CDN PRESERVES VS16 in
+// URL paths (e.g., :heart: at U+2764 U+FE0F serves as
+// "2764-fe0f.png", not "2764.png"). The earlier design doc
+// hypothesized VS16 was stripped; empirical fetching against the CDN
+// (a 403 for "2764.png" vs a 200 for "2764-fe0f.png") disproved
+// that. ZWJ (U+200D) sequences and regional-indicator flag pairs
+// are also preserved verbatim.
+//
+// The constant is retained because tokens.go uses it for scanning
+// raw emoji-presentation sequences in message text.
 const vs16 = '\uFE0F'
 
 // BuildStandardEmojiURL returns the Slack CDN URL for a standard
 // (kyokomi-known or Unicode-property-detected) emoji's codepoint
-// sequence. Codepoints are lowercase-hex, dash-joined; U+FE0F is
-// stripped.
+// sequence. Codepoints are lowercase-hex, dash-joined; ALL
+// codepoints are preserved (including U+FE0F / VS16), matching
+// Slack's CDN naming.
 //
 // Returns "" if codepoints is empty.
 func BuildStandardEmojiURL(codepoints []rune) string {
+	if len(codepoints) == 0 {
+		return ""
+	}
 	parts := make([]string, 0, len(codepoints))
 	for _, r := range codepoints {
-		if r == vs16 {
-			continue
-		}
 		parts = append(parts, fmt.Sprintf("%x", r))
-	}
-	if len(parts) == 0 {
-		return ""
 	}
 	return CDNBaseURL + strings.Join(parts, "-") + ".png"
 }
@@ -70,8 +74,8 @@ func BuildStandardEmojiURL(codepoints []rune) string {
 // names, workspace customs) are not resolved here — call
 // BuildCustomEmojiURL with the workspace customs map for those.
 //
-// VS16 and ZWJ are returned verbatim; URL construction strips VS16
-// at BuildStandardEmojiURL time.
+// VS16 and ZWJ are returned verbatim and preserved through URL
+// construction (see BuildStandardEmojiURL).
 func CodepointsForShortcode(name string) ([]rune, bool) {
 	ensureKyokomiCodeMap()
 	key := ":" + name + ":"
