@@ -621,9 +621,13 @@ func renderInlineFormattingWith(text string, opts RenderSlackMarkdownOpts) strin
 	// first because skin-toned shortcodes (e.g. :wave_tone3:)
 	// should resolve as their base name (:wave:) rather than be
 	// left as literal text.
+	//
+	// Image path: preserve skin-tone suffixes — the URL builder
+	// routes them to the correct per-tone Slack CDN asset. The
+	// old StripSkinToneFromText call was a glyph-rendering width
+	// workaround that doesn't apply to kitty-image placements.
 	if emojiutil.ImageModeActive() && opts.PlaceCtx.Fetcher != nil {
-		stripped := emojiutil.StripSkinToneFromText(text)
-		tokens := emojiutil.ResolveEmojiToTokens(stripped, opts.Customs)
+		tokens := emojiutil.ResolveEmojiToTokens(text, opts.Customs)
 		text = renderEmojiTokensInline(tokens, opts.PlaceCtx, opts.EmojiCells, opts.EmojiFlushes)
 	} else {
 		text = emojiutil.ResolveShortcodesInText(emojiutil.StripSkinToneFromText(text))

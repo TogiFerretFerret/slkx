@@ -154,5 +154,87 @@ func URLForShortcode(name string, customs map[string]string) (string, bool) {
 	if cps, ok := CodepointsForShortcode(name); ok {
 		return BuildStandardEmojiURL(cps), true
 	}
+	// Fallback for skin-toned variants that aren't pre-resolved in
+	// kyokomi (e.g. "+1::skin-tone-3" or "+1_tone3"). Compose the
+	// base emoji's codepoints with the skin-tone modifier codepoint
+	// and build the URL directly. Slack's CDN serves these at the
+	// expected combined-codepoint path.
+	if cps, ok := ComposeSkinTonedCodepoints(name); ok {
+		return BuildStandardEmojiURL(cps), true
+	}
 	return "", false
+}
+
+// skinToneCodepoints maps the "tone1".."tone5" suffix digit to the
+// Unicode skin tone modifier codepoint.
+var skinToneCodepoints = [...]rune{
+	1: 0x1F3FB, // tone1
+	2: 0x1F3FC, // tone2
+	3: 0x1F3FD, // tone3
+	4: 0x1F3FE, // tone4
+	5: 0x1F3FF, // tone5
+}
+
+// ComposeSkinTonedCodepoints decomposes a skin-toned shortcode name
+// (either Slack's "::skin-tone-N" or kyokomi's "_toneN" form), looks
+// up the base shortcode in the kyokomi codemap, and appends the
+// matching skin-tone modifier codepoint.
+//
+// Used by URLForShortcode as a fallback for skin-toned variants that
+// aren't pre-resolved in kyokomi's codemap (e.g. ":+1_tone3:" is not
+// in the codemap, but ":+1:" is, and combining its codepoint with
+// U+1F3FD produces the correct asset URL).
+//
+// Returns (codepoints, true) on success. Returns (nil, false) when:
+//   - name has no recognizable tone suffix
+//   - the tone digit is out of range
+//   - the base shortcode isn't in the kyokomi codemap
+func ComposeSkinTonedCodepoints(name string) ([]rune, bool) {
+	base, tone, ok := splitSkinToneSuffix(name)
+	if !ok {
+		return nil, false
+	}
+	if tone < 1 || tone > 5 {
+		return nil, false
+	}
+	baseCps, ok := CodepointsForShortcode(base)
+	if !ok {
+		return nil, false
+	}
+	out := make([]rune, len(baseCps)+1)
+	copy(out, baseCps)
+	out[len(baseCps)] = skinToneCodepoints[tone]
+	return out, true
+}
+
+// splitSkinToneSuffix splits a skin-toned shortcode name into the base
+// name and tone digit. Returns (base, toneDigit, true) on success, or
+// ("", 0, false) if the name has no recognizable suffix.
+//
+// Recognized forms:
+//
+//	"+1::skin-tone-3"  → ("+1", 3, true)        // Slack reaction API
+//	"thumbsup_tone3"   → ("thumbsup", 3, true)  // kyokomi
+//
+// Note: this overlaps in shape with StripSkinTone in fuse.go, which
+// returns just the base name and is used by the legacy glyph-rendering
+// fallback path. Different return shape, different purpose — keeping
+// them separate is intentional.
+func splitSkinToneSuffix(name string) (string, int, bool) {
+	// Slack form: "<base>::skin-tone-N"
+	if i := strings.Index(name, "::skin-tone-"); i >= 0 {
+		tail := name[i+len("::skin-tone-"):]
+		if len(tail) == 1 && tail[0] >= '1' && tail[0] <= '5' {
+			return name[:i], int(tail[0] - '0'), true
+		}
+	}
+	// kyokomi form: "<base>_toneN" where N is 1-5, exactly 6 trailing chars.
+	if len(name) >= 7 {
+		end := name[len(name)-6:]
+		if end[0] == '_' && end[1] == 't' && end[2] == 'o' && end[3] == 'n' && end[4] == 'e' &&
+			end[5] >= '1' && end[5] <= '5' {
+			return name[:len(name)-6], int(end[5] - '0'), true
+		}
+	}
+	return "", 0, false
 }

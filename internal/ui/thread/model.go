@@ -1731,24 +1731,21 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 			pillCells = 2
 		}
 		for i, r := range msg.Reactions {
-			// Drop any skin-tone modifier suffix so the pill renders the
-			// base emoji at a well-known width. Skin-toned glyphs render
-			// inconsistently across terminals and tend to break border
-			// alignment regardless of how we measure them.
+			// Image path: pass r.Emoji directly (including any skin-tone
+			// suffix) — URLForShortcode composes the per-tone CDN URL
+			// natively. Stripping skin tone was a workaround for
+			// glyph-rendering width inconsistencies that no longer apply
+			// at the kitty-image cell footprint. Mirror of the
+			// messages-pane reaction-pill loop.
 			//
-			// Resolve the shortcode to Unicode and check whether the
-			// resolved form is composition-safe. Multi-codepoint
-			// sequences (ZWJ flags, regional-indicator flag pairs,
-			// any residual skin-tone modifiers) render as broken
-			// glyphs in many terminal fonts and break right-border
-			// alignment; in those cases we display the readable
-			// :shortcode: text instead. Mirror of the message-pane
-			// fix; see internal/emoji/shouldrender.go.
-			nameForLookup := emojiutil.StripSkinTone(r.Emoji)
+			// Legacy path: still strip the suffix because the glyph
+			// renderer suffers the original width-inconsistency problem
+			// (multi-codepoint ZWJ / skin-tone sequences render at
+			// terminal-dependent widths and break border alignment).
 			var emojiStr string
 			var placedFlush func(io.Writer) error
 			if imageOK {
-				if url, ok := emojiutil.URLForShortcode(nameForLookup, m.emojiCtx.Customs); ok {
+				if url, ok := emojiutil.URLForShortcode(r.Emoji, m.emojiCtx.Customs); ok {
 					if placement, flush, ok := emojiutil.Place(m.emojiCtx.PlaceCtx, url, pillCells); ok {
 						emojiStr = placement
 						placedFlush = flush
@@ -1757,12 +1754,14 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 			}
 			if emojiStr == "" {
 				// Legacy fallback path (image mode off, no URL, or
-				// Place returned false).
-				resolved := kyoemoji.Sprint(":" + nameForLookup + ":")
+				// Place returned false). Strip skin tone here only —
+				// the glyph renderer still needs the workaround.
+				legacyName := emojiutil.StripSkinTone(r.Emoji)
+				resolved := kyoemoji.Sprint(":" + legacyName + ":")
 				if emojiutil.ShouldRenderUnicode(resolved) {
 					emojiStr = resolved
 				} else {
-					emojiStr = ":" + nameForLookup + ":"
+					emojiStr = ":" + legacyName + ":"
 				}
 			}
 			pillText := fmt.Sprintf("%s%d", emojiStr, r.Count)
