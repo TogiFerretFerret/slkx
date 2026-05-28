@@ -178,7 +178,7 @@ var reduceIO reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// that renders emoji so the next View() picks up the warm-
 		// cache placement. Cheap coarse invalidation in v1.
 		a.messagepane.HandleEmojiImageReady(m.URL)
-		// Phase 7 adds a.threadPanel.HandleEmojiImageReady(m.URL).
+		a.threadPanel.HandleEmojiImageReady(m.URL)
 		// Phase 8 adds picker invalidation. Phase 9 adds autocomplete.
 		return nil, true
 
