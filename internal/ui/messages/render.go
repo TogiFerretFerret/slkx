@@ -3,6 +3,7 @@ package messages
 import (
 	"fmt"
 	"image/color"
+	"io"
 	"regexp"
 	"strings"
 	"unicode"
@@ -430,13 +431,49 @@ func SidebarMutedFgANSI() string {
 	return cachedSidebarMutedFgANSI
 }
 
+// RenderSlackMarkdownOpts extends the legacy 3-arg RenderSlackMarkdown
+// signature with optional emoji-image rendering. When PlaceCtx.Fetcher
+// is non-nil AND emoji.ImageModeActive() returns true, emoji are
+// rendered as kitty image placements via emoji.Place; otherwise the
+// legacy glyph/shortcode-text path runs (byte-identical to the
+// 3-arg form).
+//
+// EmojiFlushes accumulates kitty image upload callbacks for the warm
+// path. nil disables flush collection (cold-only callers, or callers
+// that don't care about flushes — e.g., tests).
+type RenderSlackMarkdownOpts struct {
+	UserNames    map[string]string
+	ChannelNames map[string]string
+
+	// Emoji-image opts (zero values disable the image path).
+	PlaceCtx     emojiutil.PlaceContext
+	EmojiCells   int                      // 0 falls back to 2
+	Customs      map[string]string        // workspace custom emoji map; may be nil
+	EmojiFlushes *[]func(io.Writer) error // append-only; may be nil
+}
+
 // RenderSlackMarkdown converts Slack-flavored markdown and emoji shortcodes
 // into lipgloss-styled terminal output. If userNames is provided, user mentions
 // like <@U1234> are resolved to display names. If channelNames is provided,
 // bare <#C1234> channel mentions (without an embedded name) are resolved
 // to #channel-name; mentions that already carry the embedded |name form
 // don't need the map.
+//
+// RenderSlackMarkdown is the legacy 3-arg entry point preserved for all
+// callers that don't need emoji-image rendering (tests, threads view
+// preview, etc.). New code should use RenderSlackMarkdownWith to get the
+// image-path branch.
 func RenderSlackMarkdown(text string, userNames map[string]string, channelNames map[string]string) string {
+	return RenderSlackMarkdownWith(text, RenderSlackMarkdownOpts{
+		UserNames:    userNames,
+		ChannelNames: channelNames,
+	})
+}
+
+// RenderSlackMarkdownWith is the full-featured entry point. See
+// RenderSlackMarkdownOpts for the per-call configuration. With a zero
+// opts struct it is byte-identical to RenderSlackMarkdown.
+func RenderSlackMarkdownWith(text string, opts RenderSlackMarkdownOpts) string {
 	// Handle code blocks first (before other formatting to avoid conflicts)
 	text = codeBlockRe.ReplaceAllStringFunc(text, func(match string) string {
 		inner := codeBlockRe.FindStringSubmatch(match)[1]
@@ -454,7 +491,7 @@ func RenderSlackMarkdown(text string, userNames map[string]string, channelNames 
 			quoted = slackEntityDecoder.Replace(quoted)
 			line = blockquoteStyle().Render(quoted)
 		} else {
-			line = renderInlineFormatting(line, userNames, channelNames)
+			line = renderInlineFormattingWith(line, opts)
 			// Decode Slack-escaped entities after markup regexes have
 			// consumed legitimate <...> markers, so escaped user input
 			// (e.g. literal "<@U1>") doesn't become a fake mention.
@@ -476,7 +513,19 @@ func RenderSlackMarkdown(text string, userNames map[string]string, channelNames 
 	return output
 }
 
+// renderInlineFormatting is the legacy 3-arg wrapper. Used only by
+// tests that pre-date the opts struct; production code (called via
+// RenderSlackMarkdownWith) goes through renderInlineFormattingWith.
 func renderInlineFormatting(text string, userNames map[string]string, channelNames map[string]string) string {
+	return renderInlineFormattingWith(text, RenderSlackMarkdownOpts{
+		UserNames:    userNames,
+		ChannelNames: channelNames,
+	})
+}
+
+func renderInlineFormattingWith(text string, opts RenderSlackMarkdownOpts) string {
+	userNames := opts.UserNames
+	channelNames := opts.ChannelNames
 	// Inline code (before bold/italic to avoid conflicts inside code)
 	text = inlineCodeRe.ReplaceAllStringFunc(text, func(match string) string {
 		inner := inlineCodeRe.FindStringSubmatch(match)[1]
