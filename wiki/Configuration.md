@@ -192,6 +192,11 @@ sidebar_text_muted = "#9A9B9E"
 rail_background    = "#19171D"
 ```
 
+Every built-in theme now sets a channels-panel (sidebar) background that is
+perceptibly distinct from the message pane. When writing a custom theme,
+set `sidebar_background` to a clearly darker (or, on near-black themes, a
+slightly lighter) shade than `background` for the same effect.
+
 Switch themes live with `Ctrl+y`.
 
 ## Data paths (XDG)

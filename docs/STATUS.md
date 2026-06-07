@@ -36,7 +36,7 @@ Last updated: 2026-05-03
 - [x] Ctrl+t/Ctrl+p fuzzy channel finder overlay with blue input border
 - [x] Green left-border selection indicator (messages, threads, channels, channel finder)
 - [x] Workspace rail -- borderless dark background strip
-- [x] Customizable themes (12 built-in themes, custom theme files, Ctrl+y theme switcher)
+- [x] Customizable themes (59 built-in themes, custom theme files, Ctrl+y theme switcher)
 
 ### Messages
 - [x] Fetch and display channel messages

@@ -1,8 +1,11 @@
 package styles
 
 import (
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -283,5 +286,182 @@ func TestANSIThemesSelectionTintPaletteInherited(t *testing.T) {
 				t.Errorf("%s unfocused selection tint = %T, want ansi.BasicColor (palette-inherited)", tc.theme, unfocused)
 			}
 		})
+	}
+}
+
+// --- channels-panel contrast guard ---
+
+// contrastAllowlist are themes intentionally exempt from the
+// channels-panel contrast requirement: the ANSI themes use palette
+// numbers (not hex), so a CIELAB hex computation doesn't apply to them
+// (they inherit the terminal palette). "hot dog stand" is a deliberately
+// garish novelty whose hand-picked red-on-yellow palette we never want
+// the contrast retune to touch; it already clears the threshold on its
+// own, so the exemption is belt-and-suspenders.
+var contrastAllowlist = map[string]bool{
+	"ansi dark":     true,
+	"ansi light":    true,
+	"hot dog stand": true,
+}
+
+// minChannelsPanelDeltaLstar is the minimum perceptual lightness
+// difference (CIELAB L*) between a theme's message-pane Background and
+// its channels-panel SidebarBackground. 6.0 is calibrated so the
+// slack-default split (ΔL*≈72) passes easily while a 1–2% nudge
+// (ΔL*≈3) fails. See spec 2026-06-07-more-themes-design.md.
+const minChannelsPanelDeltaLstar = 6.0
+
+func srgbToLinear(c float64) float64 {
+	if c <= 0.04045 {
+		return c / 12.92
+	}
+	return math.Pow((c+0.055)/1.055, 2.4)
+}
+
+// lstar returns the CIELAB L* (0..100) of a "#RRGGBB" hex string.
+func lstar(hex string) float64 {
+	h := strings.TrimPrefix(hex, "#")
+	if len(h) != 6 {
+		return 0
+	}
+	ri, _ := strconv.ParseInt(h[0:2], 16, 0)
+	gi, _ := strconv.ParseInt(h[2:4], 16, 0)
+	bi, _ := strconv.ParseInt(h[4:6], 16, 0)
+	r := srgbToLinear(float64(ri) / 255)
+	g := srgbToLinear(float64(gi) / 255)
+	b := srgbToLinear(float64(bi) / 255)
+	y := 0.2126*r + 0.7152*g + 0.0722*b
+	if y > 0.008856 {
+		return 116*math.Cbrt(y) - 16
+	}
+	return 903.3 * y
+}
+
+// TestChannelsPanelContrast asserts every non-allowlisted built-in
+// theme gives the channels panel a perceptibly distinct surface from
+// the message pane. Reports each theme's measured ΔL* on failure so the
+// retune is a deterministic adjust-and-rerun loop.
+func TestChannelsPanelContrast(t *testing.T) {
+	for key, theme := range builtinThemes {
+		if contrastAllowlist[key] {
+			continue
+		}
+		bg := theme.Colors.Background
+		sb := theme.Colors.SidebarBackground
+		if sb == "" {
+			sb = bg // falls back to Background -> zero contrast
+		}
+		if !strings.HasPrefix(bg, "#") || !strings.HasPrefix(sb, "#") {
+			t.Errorf("theme %q: non-hex background/sidebar not allowlisted (bg=%q sidebar=%q)", key, bg, sb)
+			continue
+		}
+		delta := math.Abs(lstar(bg) - lstar(sb))
+		if delta < minChannelsPanelDeltaLstar {
+			t.Errorf("theme %q channels-panel contrast too low: ΔL*=%.1f (bg=%s L*=%.1f, sidebar=%s L*=%.1f), want >= %.1f",
+				key, delta, bg, lstar(bg), sb, lstar(sb), minChannelsPanelDeltaLstar)
+		}
+	}
+}
+
+var darkEditorThemes = []string{
+	"Zenburn", "Gruvbox Material Dark", "Nightfox", "Carbonfox",
+	"Melange Dark", "Vesper", "Flexoki Dark", "Modus Vivendi",
+	"Night Owl", "Poimandres", "Ayu Dark", "Kanagawa Dragon",
+}
+
+func TestDarkEditorThemesRegistered(t *testing.T) {
+	have := map[string]bool{}
+	for _, n := range ThemeNames() {
+		have[n] = true
+	}
+	for _, want := range darkEditorThemes {
+		if !have[want] {
+			t.Errorf("dark editor theme %q not registered", want)
+		}
+	}
+}
+
+func TestDarkEditorThemesHaveRequiredColors(t *testing.T) {
+	for _, name := range darkEditorThemes {
+		c := lookupTheme(strings.ToLower(name))
+		if c.Primary == "" || c.Accent == "" || c.Warning == "" || c.Error == "" ||
+			c.Background == "" || c.Surface == "" || c.SurfaceDark == "" ||
+			c.Text == "" || c.TextMuted == "" || c.Border == "" {
+			t.Errorf("theme %q missing required color(s): %+v", name, c)
+		}
+	}
+}
+
+var lightEditorThemes = []string{
+	"Rosé Pine Dawn", "Everforest Light", "Flexoki Light",
+	"Modus Operandi", "Kanagawa Lotus", "PaperColor Light",
+}
+
+func TestLightEditorThemesRegistered(t *testing.T) {
+	have := map[string]bool{}
+	for _, n := range ThemeNames() {
+		have[n] = true
+	}
+	for _, want := range lightEditorThemes {
+		if !have[want] {
+			t.Errorf("light editor theme %q not registered", want)
+		}
+	}
+}
+
+func TestLightEditorThemesHaveRequiredColors(t *testing.T) {
+	for _, name := range lightEditorThemes {
+		c := lookupTheme(strings.ToLower(name))
+		if c.Primary == "" || c.Accent == "" || c.Warning == "" || c.Error == "" ||
+			c.Background == "" || c.Surface == "" || c.SurfaceDark == "" ||
+			c.Text == "" || c.TextMuted == "" || c.Border == "" {
+			t.Errorf("theme %q missing required color(s): %+v", name, c)
+		}
+	}
+}
+
+func TestLightEditorThemesHaveDarkSidebars(t *testing.T) {
+	for _, name := range lightEditorThemes {
+		c := lookupTheme(strings.ToLower(name))
+		if c.SidebarBackground == "" {
+			t.Errorf("light theme %q must set SidebarBackground", name)
+		}
+		if c.RailBackground == "" {
+			t.Errorf("light theme %q must set RailBackground", name)
+		}
+	}
+}
+
+var slackBrandedThemes = []string{
+	"Aubergine", "Ochin", "Choco Mint", "Mocha", "Nocturne",
+}
+
+func TestSlackBrandedThemesRegistered(t *testing.T) {
+	have := map[string]bool{}
+	for _, n := range ThemeNames() {
+		have[n] = true
+	}
+	for _, want := range slackBrandedThemes {
+		if !have[want] {
+			t.Errorf("slack-branded theme %q not registered", want)
+		}
+	}
+}
+
+func TestSlackBrandedThemesHaveRequiredColors(t *testing.T) {
+	for _, name := range slackBrandedThemes {
+		c := lookupTheme(strings.ToLower(name))
+		if c.Primary == "" || c.Accent == "" || c.Warning == "" || c.Error == "" ||
+			c.Background == "" || c.Surface == "" || c.SurfaceDark == "" ||
+			c.Text == "" || c.TextMuted == "" || c.Border == "" {
+			t.Errorf("theme %q missing required color(s): %+v", name, c)
+		}
+	}
+}
+
+func TestBuiltinThemeCount(t *testing.T) {
+	const want = 59
+	if got := len(builtinThemes); got != want {
+		t.Errorf("builtinThemes count = %d, want %d (update docs in README.md and wiki/Features.md if this changed intentionally)", got, want)
 	}
 }

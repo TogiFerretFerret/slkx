@@ -14,7 +14,7 @@
 - **Fast.** Cold start in milliseconds. Render-cached messages. SQLite-backed scrollback. Real-time over WebSocket.
 - **Tiny.** ~19 MB on disk. ~60 MB RSS for a live multi-workspace session vs. 500 MB–1.5 GB for the official client. No node_modules, no Chromium, no 1Gb RAM tax.
 - **Keyboard-first.** Vim-style modal editing. `j/k`, `h/l`, `i`, `Esc`.
-- **Pretty.** 36 built-in themes, lipgloss-styled panels, true-pixel avatars on kitty (half-block fallback elsewhere), emoji shortcodes, day separators, and pill-style reactions.
+- **Pretty.** 59 built-in themes, lipgloss-styled panels, true-pixel avatars on kitty (half-block fallback elsewhere), emoji shortcodes, day separators, and pill-style reactions.
 - **Multi-workspace.** All your workspaces stay connected in parallel. `1`–`9` to instantly jump between them, with live unread badges in the rail.
 - **Yours.** TOML config, custom themes, custom channel sections via glob, XDG-compliant paths.
 
@@ -27,7 +27,7 @@
 - Slack-native sidebar sections, kept live; or glob-based config sections
 - Browser-cookie auth (`xoxc` + `d`) — no Slack App required
 - Vim-style modal keybindings, fuzzy channel finder, workspace picker
-- 36 themes + drop-in custom themes, live theme switcher
+- 59 themes + drop-in custom themes, live theme switcher
 - OS desktop notifications on DMs, mentions, and configurable keywords
 
 Full feature breakdown: **[[Features|https://github.com/gammons/slk/wiki/Features]]**
