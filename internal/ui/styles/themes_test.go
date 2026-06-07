@@ -429,3 +429,30 @@ func TestLightEditorThemesHaveDarkSidebars(t *testing.T) {
 		}
 	}
 }
+
+var slackBrandedThemes = []string{
+	"Aubergine", "Ochin", "Choco Mint", "Mocha", "Nocturne",
+}
+
+func TestSlackBrandedThemesRegistered(t *testing.T) {
+	have := map[string]bool{}
+	for _, n := range ThemeNames() {
+		have[n] = true
+	}
+	for _, want := range slackBrandedThemes {
+		if !have[want] {
+			t.Errorf("slack-branded theme %q not registered", want)
+		}
+	}
+}
+
+func TestSlackBrandedThemesHaveRequiredColors(t *testing.T) {
+	for _, name := range slackBrandedThemes {
+		c := lookupTheme(strings.ToLower(name))
+		if c.Primary == "" || c.Accent == "" || c.Warning == "" || c.Error == "" ||
+			c.Background == "" || c.Surface == "" || c.SurfaceDark == "" ||
+			c.Text == "" || c.TextMuted == "" || c.Border == "" {
+			t.Errorf("theme %q missing required color(s): %+v", name, c)
+		}
+	}
+}

@@ -420,6 +420,45 @@ var builtinThemes = map[string]struct {
 		SidebarBackground: "#1C1C1C", SidebarText: "#E4E4E4", SidebarTextMuted: "#878787",
 		RailBackground: "#080808",
 	}},
+	"aubergine": {"Aubergine", ThemeColors{
+		// Slack's classic dark-aubergine sidebar on a white message pane.
+		Primary: "#1264A3", Accent: "#007A5A", Warning: "#ECB22E", Error: "#E01E5A",
+		Background: "#FFFFFF", Surface: "#F8F8F8", SurfaceDark: "#F0F0F0",
+		Text: "#1D1C1D", TextMuted: "#616061", Border: "#DDDDDD",
+		SidebarBackground: "#4D394B", SidebarText: "#FFFFFF", SidebarTextMuted: "#BAA2B8",
+		RailBackground: "#3E313C",
+	}},
+	"ochin": {"Ochin", ThemeColors{
+		// Popular slate-blue Slack sidebar theme, light message pane.
+		Primary: "#4A90D9", Accent: "#4CA64C", Warning: "#ECB22E", Error: "#EB4D5C",
+		Background: "#FFFFFF", Surface: "#F6F7F8", SurfaceDark: "#EDEFF1",
+		Text: "#1D1C1D", TextMuted: "#616061", Border: "#DCDFE3",
+		SidebarBackground: "#303E4D", SidebarText: "#DAE3ED", SidebarTextMuted: "#8B97A5",
+		RailBackground: "#232D38",
+	}},
+	"choco mint": {"Choco Mint", ThemeColors{
+		// Dark-chocolate sidebar with a mint accent on a warm light pane.
+		Primary: "#16A085", Accent: "#16C098", Warning: "#D9A441", Error: "#C0563B",
+		Background: "#FAF7F2", Surface: "#F0EBE3", SurfaceDark: "#E6DFD5",
+		Text: "#2B2017", TextMuted: "#6E6258", Border: "#DDD4C8",
+		SidebarBackground: "#25190F", SidebarText: "#E8E2DB", SidebarTextMuted: "#A8998C",
+		RailBackground: "#1A1109",
+	}},
+	"mocha": {"Mocha", ThemeColors{
+		// Warm coffee sidebar on a light pane.
+		Primary: "#A0522D", Accent: "#C58A5E", Warning: "#D89A4E", Error: "#B5453B",
+		Background: "#F7F3F0", Surface: "#EDE7E2", SurfaceDark: "#E2DAD3",
+		Text: "#2A2220", TextMuted: "#6B5E58", Border: "#DAD0C8",
+		SidebarBackground: "#2E2422", SidebarText: "#E6DCD6", SidebarTextMuted: "#A38F86",
+		RailBackground: "#211A18",
+	}},
+	"nocturne": {"Nocturne", ThemeColors{
+		// Deep blue-black dark theme; sidebar raised for separation.
+		Primary: "#4F9CD9", Accent: "#4FB477", Warning: "#E0B14F", Error: "#E0556B",
+		Background: "#0F1620", Surface: "#18222F", SurfaceDark: "#0A0F16",
+		Text: "#C3CCD9", TextMuted: "#66717F", Border: "#1F2C3A",
+		SidebarBackground: "#1A2736", RailBackground: "#0A0F16",
+	}},
 }
 
 // customThemes stores themes loaded from the user's themes directory.
