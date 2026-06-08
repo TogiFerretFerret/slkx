@@ -42,6 +42,7 @@ import (
 	"github.com/gammons/slk/internal/ui/styles"
 	"github.com/gammons/slk/internal/ui/themeswitcher"
 	"github.com/gammons/slk/internal/ui/workspace"
+	versionpkg "github.com/gammons/slk/internal/version"
 	"github.com/gammons/slk/internal/wake"
 	emoji "github.com/kyokomi/emoji/v2"
 	"github.com/slack-go/slack"
@@ -540,6 +541,7 @@ func run() error {
 
 	// Create app
 	app := ui.NewApp()
+	app.SetHelpFooter(versionpkg.ModalFooter(version))
 	app.SetClipboardAvailable(clipboardOK)
 	if useWaylandClipboard {
 		app.SetClipboardReader(ui.WaylandClipboardReader())

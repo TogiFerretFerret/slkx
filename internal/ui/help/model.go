@@ -31,7 +31,8 @@ type Model struct {
 	query     string
 	selected  int // index into filtered
 	visible   bool
-	searching bool // true while typing in the / search input
+	searching bool   // true while typing in the / search input
+	footer    string // optional attribution line rendered above the controls footer
 }
 
 // New creates a new help overlay.
@@ -43,6 +44,12 @@ func New() Model {
 func (m *Model) SetEntries(entries []Entry) {
 	m.entries = entries
 	m.filter()
+}
+
+// SetFooter sets an optional attribution line rendered above the
+// controls footer. Pass "" to clear it.
+func (m *Model) SetFooter(s string) {
+	m.footer = s
 }
 
 // FromKeyMap derives Entries from any struct whose fields are key.Binding.
@@ -447,10 +454,20 @@ func (m Model) renderBox(termWidth, termHeight int) string {
 			Render("No matching keybindings"))
 	}
 
-	footer := lipgloss.NewStyle().
+	controlsFooter := lipgloss.NewStyle().
 		Background(bg).
 		Foreground(styles.TextMuted).
 		Render("/ search   esc/q close")
+
+	footer := controlsFooter
+	if m.footer != "" {
+		attribution := lipgloss.NewStyle().
+			Background(bg).
+			Foreground(styles.TextMuted).
+			MaxWidth(innerWidth).
+			Render(m.footer)
+		footer = attribution + "\n" + controlsFooter
+	}
 
 	content := title + "\n" + inputLine + "\n\n" + strings.Join(rows, "\n") + "\n\n" + footer
 

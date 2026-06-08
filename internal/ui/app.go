@@ -2098,6 +2098,12 @@ func (a *App) SetTypingEnabled(enabled bool) {
 	a.typing.SetEnabled(enabled)
 }
 
+// SetHelpFooter sets the attribution line shown at the bottom of the
+// help modal (e.g. the version + author credit). Pass "" to clear it.
+func (a *App) SetHelpFooter(s string) {
+	a.help.SetFooter(s)
+}
+
 // SetMouseWheelLines configures the number of lines the viewport scrolls per
 // mouse-wheel notch. Values < 1 are coerced to 1 to guarantee scroll progress.
 func (a *App) SetMouseWheelLines(n int) {
