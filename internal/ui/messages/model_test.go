@@ -1404,3 +1404,29 @@ func TestUpdateReactionMaintainsUserIDs(t *testing.T) {
 		t.Fatalf("want 0 reactions after all removed, got %d", len(msg.Reactions))
 	}
 }
+
+// TestAppendRemoveUserIDDoNotMutateInput proves the helpers are pure: the
+// UserIDs slices are aliased across the message pane and thread panel, so the
+// helpers must never write into the input's backing array.
+func TestAppendRemoveUserIDDoNotMutateInput(t *testing.T) {
+	orig := []string{"U1", "U2", "U3"}
+	shared := orig[:3:3] // same backing array, capped
+
+	got := RemoveUserID(shared, "U1")
+	if len(got) != 2 || got[0] != "U2" || got[1] != "U3" {
+		t.Fatalf("RemoveUserID result wrong: %v", got)
+	}
+	if orig[0] != "U1" || orig[1] != "U2" || orig[2] != "U3" {
+		t.Fatalf("RemoveUserID mutated input backing array: %v", orig)
+	}
+
+	base := []string{"U1"}
+	base2 := base[:1:1] // force append to allocate
+	got2 := AppendUserID(base2, "U2")
+	if len(got2) != 2 || got2[0] != "U1" || got2[1] != "U2" {
+		t.Fatalf("AppendUserID result wrong: %v", got2)
+	}
+	if len(base) != 1 || base[0] != "U1" {
+		t.Fatalf("AppendUserID mutated input: %v", base)
+	}
+}

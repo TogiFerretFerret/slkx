@@ -803,7 +803,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 				for j, r := range reply.Reactions {
 					if r.Emoji == emojiName {
 						r.Count--
-						r.UserIDs = removeUserID(r.UserIDs, userID)
+						r.UserIDs = messages.RemoveUserID(r.UserIDs, userID)
 						if r.Count <= 0 {
 							m.replies[i].Reactions = append(reply.Reactions[:j], reply.Reactions[j+1:]...)
 						} else {
@@ -819,7 +819,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 					if r.Emoji == emojiName {
 						r.Count++
 						r.HasReacted = true
-						r.UserIDs = appendUserID(r.UserIDs, userID)
+						r.UserIDs = messages.AppendUserID(r.UserIDs, userID)
 						m.replies[i].Reactions[j] = r
 						found = true
 						break
@@ -830,7 +830,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 						Emoji:      emojiName,
 						Count:      1,
 						HasReacted: true,
-						UserIDs:    appendUserID(nil, userID),
+						UserIDs:    messages.AppendUserID(nil, userID),
 					})
 				}
 			}
@@ -1909,32 +1909,4 @@ func (m *Model) renderThreadMessage(msg messages.MessageItem, width int, userNam
 	}
 
 	return line + "\n" + text + attachmentLines + reactionLine, flushes, reactionHits
-}
-
-// appendUserID returns ids with userID appended, skipping empty IDs and
-// de-duplicating so repeated reaction events don't double-count a user.
-func appendUserID(ids []string, userID string) []string {
-	if userID == "" {
-		return ids
-	}
-	for _, id := range ids {
-		if id == userID {
-			return ids
-		}
-	}
-	return append(ids, userID)
-}
-
-// removeUserID returns ids without userID (all occurrences).
-func removeUserID(ids []string, userID string) []string {
-	if userID == "" || len(ids) == 0 {
-		return ids
-	}
-	out := ids[:0]
-	for _, id := range ids {
-		if id != userID {
-			out = append(out, id)
-		}
-	}
-	return out
 }

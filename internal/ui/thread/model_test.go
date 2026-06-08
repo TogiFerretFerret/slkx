@@ -870,7 +870,25 @@ func TestThreadUpdateReactionMaintainsUserIDs(t *testing.T) {
 		t.Fatalf("want UserIDs [U1], got %v", got)
 	}
 
+	// Add a second user to the same emoji -> appends to the group.
+	m.UpdateReaction("200.0", "eyes", "U2", false)
+	reply = m.SelectedReply()
+	if got := reply.Reactions[0].UserIDs; len(got) != 2 || got[1] != "U2" {
+		t.Fatalf("want UserIDs [U1 U2], got %v", got)
+	}
+
+	// Remove one of many -> group remains with U2.
 	m.UpdateReaction("200.0", "eyes", "U1", true)
+	reply = m.SelectedReply()
+	if reply == nil || len(reply.Reactions) != 1 {
+		t.Fatalf("want 1 reaction remaining after removing one of two")
+	}
+	if got := reply.Reactions[0].UserIDs; len(got) != 1 || got[0] != "U2" {
+		t.Fatalf("want UserIDs [U2] after removing U1, got %v", got)
+	}
+
+	// Remove the last user -> group disappears.
+	m.UpdateReaction("200.0", "eyes", "U2", true)
 	reply = m.SelectedReply()
 	if reply != nil && len(reply.Reactions) != 0 {
 		t.Fatalf("want 0 reactions after remove, got %d", len(reply.Reactions))

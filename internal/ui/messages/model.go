@@ -80,7 +80,7 @@ type ReactionItem struct {
 	Emoji      string   // emoji name without colons, e.g. "thumbsup"
 	Count      int
 	HasReacted bool     // whether the current user has reacted with this emoji
-	UserIDs    []string // user IDs who reacted with this emoji (cache-sourced)
+	UserIDs    []string // user IDs who reacted with this emoji
 }
 
 // viewEntry is a pre-rendered row in the message list (message or date separator).
@@ -1132,7 +1132,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 				for j, r := range msg.Reactions {
 					if r.Emoji == emojiName {
 						r.Count--
-						r.UserIDs = removeUserID(r.UserIDs, userID)
+						r.UserIDs = RemoveUserID(r.UserIDs, userID)
 						if r.Count <= 0 {
 							m.messages[i].Reactions = append(msg.Reactions[:j], msg.Reactions[j+1:]...)
 						} else {
@@ -1148,7 +1148,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 					if r.Emoji == emojiName {
 						r.Count++
 						r.HasReacted = true
-						r.UserIDs = appendUserID(r.UserIDs, userID)
+						r.UserIDs = AppendUserID(r.UserIDs, userID)
 						m.messages[i].Reactions[j] = r
 						found = true
 						break
@@ -1159,7 +1159,7 @@ func (m *Model) UpdateReaction(messageTS, emojiName, userID string, remove bool)
 						Emoji:      emojiName,
 						Count:      1,
 						HasReacted: true,
-						UserIDs:    appendUserID(nil, userID),
+						UserIDs:    AppendUserID(nil, userID),
 					})
 				}
 			}
@@ -3332,9 +3332,11 @@ func summarizeMessageItems(items []MessageItem) string {
 		len(items), items[0].TS, items[len(items)-1].TS)
 }
 
-// appendUserID returns ids with userID appended, skipping empty IDs and
-// de-duplicating so repeated reaction events don't double-count a user.
-func appendUserID(ids []string, userID string) []string {
+// AppendUserID returns a new slice with userID appended. Empty IDs are
+// skipped and duplicates are not added. The input slice is never mutated --
+// reaction UserIDs slices are aliased across the message pane and thread
+// panel, so in-place mutation would corrupt the other model's view.
+func AppendUserID(ids []string, userID string) []string {
 	if userID == "" {
 		return ids
 	}
@@ -3343,15 +3345,18 @@ func appendUserID(ids []string, userID string) []string {
 			return ids
 		}
 	}
-	return append(ids, userID)
+	out := make([]string, len(ids), len(ids)+1)
+	copy(out, ids)
+	return append(out, userID)
 }
 
-// removeUserID returns ids without userID (all occurrences).
-func removeUserID(ids []string, userID string) []string {
+// RemoveUserID returns a new slice without userID (all occurrences). The
+// input slice is never mutated (see AppendUserID for why).
+func RemoveUserID(ids []string, userID string) []string {
 	if userID == "" || len(ids) == 0 {
 		return ids
 	}
-	out := ids[:0]
+	out := make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id != userID {
 			out = append(out, id)
