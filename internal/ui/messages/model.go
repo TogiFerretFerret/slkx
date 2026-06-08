@@ -77,7 +77,7 @@ type ThumbSpec struct {
 type AvatarFunc func(userID string) string
 
 type ReactionItem struct {
-	Emoji      string   // emoji name without colons, e.g. "thumbsup"
+	Emoji      string // emoji name without colons, e.g. "thumbsup"
 	Count      int
 	HasReacted bool     // whether the current user has reacted with this emoji
 	UserIDs    []string // user IDs who reacted with this emoji
