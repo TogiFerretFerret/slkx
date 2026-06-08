@@ -4313,3 +4313,45 @@ func TestSeedNewMessagePicker_PopulatesUsersAndExcludesSelf(t *testing.T) {
 		}
 	}
 }
+
+func TestListReactionsKeyOpensModal(t *testing.T) {
+	app := NewApp()
+	app.focusedPanel = PanelMessages
+	app.messagepane.SetMessages([]messages.MessageItem{{
+		TS:   "100.0",
+		Text: "decision?",
+		Reactions: []messages.ReactionItem{
+			{Emoji: "thumbsup", Count: 2, UserIDs: []string{"U1", "U2"}},
+		},
+	}})
+	app.SetUserNames(map[string]string{"U1": "Alice", "U2": "Bob"})
+
+	app.openReactionsView()
+
+	if !app.reactionsView.IsVisible() {
+		t.Fatal("openReactionsView should open the modal when reactions exist")
+	}
+	if app.mode != ModeReactionsView {
+		t.Fatalf("mode should be ModeReactionsView, got %v", app.mode)
+	}
+
+	out := app.reactionsView.ViewOverlay(80, 24, strings.Repeat("\n", 24))
+	if !strings.Contains(out, "Alice") || !strings.Contains(out, "Bob") {
+		t.Fatalf("modal should list reactor names, got:\n%s", out)
+	}
+}
+
+func TestListReactionsNoOpWhenNoReactions(t *testing.T) {
+	app := NewApp()
+	app.focusedPanel = PanelMessages
+	app.messagepane.SetMessages([]messages.MessageItem{{TS: "100.0", Text: "no reactions"}})
+
+	app.openReactionsView()
+
+	if app.reactionsView.IsVisible() {
+		t.Fatal("openReactionsView should be a no-op when the message has no reactions")
+	}
+	if app.mode == ModeReactionsView {
+		t.Fatal("mode should not change when there are no reactions")
+	}
+}
