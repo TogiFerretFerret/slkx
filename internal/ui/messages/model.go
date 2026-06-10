@@ -796,6 +796,26 @@ func (m *Model) SelectByIndex(i int) {
 	}
 }
 
+// SelectByTS moves the selection cursor to the message with the given
+// ts and forces the next View() to re-snap the viewport to it.
+// Returns false (selection unchanged) when no message with that ts is
+// in the loaded buffer. Used by the permalink-navigation path to land
+// on the exact message a Slack archive link points at.
+func (m *Model) SelectByTS(ts string) bool {
+	if ts == "" {
+		return false
+	}
+	for i := range m.messages {
+		if m.messages[i].TS == ts {
+			m.selected = i
+			m.hasSnapped = false
+			m.dirty()
+			return true
+		}
+	}
+	return false
+}
+
 // ChromeHeight returns the number of rows at the top of the messages
 // pane consumed by the channel header / separator chrome. Set during
 // View() (so callers must invoke View at least once for a meaningful

@@ -1409,6 +1409,7 @@ func run() error {
 		return ui.WorkspaceSwitchedMsg{
 			TeamID:           wctx.TeamID,
 			TeamName:         wctx.TeamName,
+			Domain:           wctx.Client.TeamSubdomain(),
 			Theme:            cfg.ResolveTheme(teamID),
 			SidebarWidth:     cfg.ResolveWidth(teamID),
 			Channels:         wctx.Channels,
@@ -1562,6 +1563,7 @@ func run() error {
 			p.Send(ui.WorkspaceReadyMsg{
 				TeamID:           wctx.TeamID,
 				TeamName:         wctx.TeamName,
+				Domain:           wctx.Client.TeamSubdomain(),
 				Theme:            cfg.ResolveTheme(wctx.TeamID),
 				SidebarWidth:     cfg.ResolveWidth(wctx.TeamID),
 				Channels:         wctx.Channels,

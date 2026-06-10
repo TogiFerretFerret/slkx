@@ -36,6 +36,7 @@ type KeyMap struct {
 	Delete              key.Binding
 	CopyPermalink       key.Binding
 	OpenPreview         key.Binding
+	OpenLink            key.Binding
 	MarkUnread          key.Binding
 	WorkspaceFinder     key.Binding
 	NewMessage          key.Binding
@@ -84,6 +85,7 @@ func DefaultKeyMap() KeyMap {
 		Delete:              key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "delete message")),
 		CopyPermalink:       key.NewBinding(key.WithKeys("Y", "C"), key.WithHelp("Y/C", "copy permalink")),
 		OpenPreview:         key.NewBinding(key.WithKeys("O", "v"), key.WithHelp("O/v", "open image preview")),
+		OpenLink:            key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "open link in message")),
 		MarkUnread:          key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "mark unread")),
 		WorkspaceFinder:     key.NewBinding(key.WithKeys("ctrl+w"), key.WithHelp("ctrl+w", "switch workspace")),
 		NewMessage:          key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "new message")),

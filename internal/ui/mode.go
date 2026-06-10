@@ -18,6 +18,7 @@ const (
 	ModeHelp
 	ModeNewMessage
 	ModeReactionsView
+	ModeLinkPicker
 )
 
 // IsModalOverlay reports whether the mode is a full-screen modal
@@ -39,7 +40,8 @@ func (m Mode) IsModalOverlay() bool {
 		ModeConfirm,
 		ModeHelp,
 		ModeNewMessage,
-		ModeReactionsView:
+		ModeReactionsView,
+		ModeLinkPicker:
 		return true
 	default:
 		return false
@@ -76,6 +78,8 @@ func (m Mode) String() string {
 		return "NEW MSG"
 	case ModeReactionsView:
 		return "REACTIONS"
+	case ModeLinkPicker:
+		return "LINKS"
 	default:
 		return "UNKNOWN"
 	}

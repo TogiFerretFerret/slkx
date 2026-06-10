@@ -95,7 +95,16 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		channelID := a.threadPanel.ChannelID()
-		a.threadPanel.SetThread(a.threadPanel.ParentMsg(), m.Replies, channelID, m.ThreadTS)
+		parentMsg := a.threadPanel.ParentMsg()
+		// Permalink-opened threads start with a stub parent (TS only).
+		// The fetch that produced this msg also wrote the full thread
+		// to cache — backfill the parent row from there.
+		if parentMsg.Text == "" {
+			if cached := a.threads.CacheRead(ids.ChannelID(channelID), ids.ThreadTS(m.ThreadTS)); len(cached) > 0 && cached[0].Text != "" {
+				parentMsg = cached[0]
+			}
+		}
+		a.threadPanel.SetThread(parentMsg, m.Replies, channelID, m.ThreadTS)
 
 		// Mark the thread as read now that the user has actually
 		// seen the replies. Server-side: fire-and-forget against

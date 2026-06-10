@@ -61,7 +61,18 @@ import (
 var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	switch m := msg.(type) {
 	case ChannelSelectedMsg:
-		return reduceChannelSelected(a, m), true
+		cmd, fetchFired := reduceChannelSelected(a, m)
+		// Permalink completion. !fetchFired means no MessagesLoadedMsg
+		// is coming (tier-1 fresh cache, or the upload-guard early
+		// return), so complete authoritatively now — otherwise the
+		// pending nav would leak and could later hijack the selection.
+		// When a fetch WAS fired, defer to the authoritative
+		// MessagesLoadedMsg completion and only do a best-effort select
+		// here.
+		if nav := a.completePendingLinkNav(m.ID, !fetchFired); nav != nil {
+			cmd = tea.Batch(cmd, nav)
+		}
+		return cmd, true
 
 	case MessagesLoadedMsg:
 		// Distinguish the three cases of the fetcher's nil-vs-[]
@@ -95,7 +106,9 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		if m.Messages != nil {
 			a.messagepane.SetMessages(m.Messages)
 		}
-		return nil, true
+		// Authoritative permalink completion: this is the freshest
+		// data we'll get for this channel.
+		return a.completePendingLinkNav(m.ChannelID, true), true
 
 	case OlderMessagesLoadedMsg:
 		debuglog.Cache("OlderMessagesLoadedMsg: channel=%s active=%s count=%d",
@@ -175,9 +188,14 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 // reduceChannelSelected handles ChannelSelectedMsg. Extracted from
 // the reduceChannels dispatch switch because the arm is ~120 lines
 // with three tiered cache-freshness branches.
-func reduceChannelSelected(a *App, m ChannelSelectedMsg) tea.Cmd {
+//
+// Returns (cmd, fetchFired) where fetchFired reports whether a network
+// message-fetch was dispatched (i.e. a MessagesLoadedMsg will follow).
+// The permalink-completion hook uses !fetchFired as its `authoritative`
+// flag.
+func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 	if a.compose.Uploading() || a.threadCompose.Uploading() {
-		return a.uploadToastCmd("Upload in progress", 2*time.Second)
+		return a.uploadToastCmd("Upload in progress", 2*time.Second), false
 	}
 	// Perf instrumentation: wall-clock the synchronous portion of the
 	// channel-switch reducer. This covers everything up to and including
@@ -282,12 +300,14 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) tea.Cmd {
 		debuglog.Cache("ChannelSelectedMsg: channel=%s tier=1_fresh", m.ID)
 		tier = "1_fresh"
 		if len(cached) == 0 {
-			return nil
+			return nil, false
 		}
 		channels := a.channels
 		chID := ids.ChannelID(m.ID)
 		latestTS := ids.MessageTS(cached[len(cached)-1].TS)
-		return func() tea.Msg { return channels.MarkRead(chID, latestTS) }
+		// MarkRead produces ChannelMarkedReadMsg, NOT MessagesLoadedMsg,
+		// so no authoritative permalink completion will follow.
+		return func() tea.Msg { return channels.MarkRead(chID, latestTS) }, false
 
 	case len(cached) > 0:
 		// Tier 2: cache exists, verify in background. Covers
@@ -302,7 +322,7 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) tea.Cmd {
 		a.statusbar.SetSyncing(true)
 		debuglog.Cache("ChannelSelectedMsg: channel=%s tier=2_verify", m.ID)
 		tier = "2_verify"
-		return fetchCmd()
+		return fetchCmd(), true
 
 	default:
 		// Tier 3: no cache at all (genuine cold-start,
@@ -312,6 +332,6 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) tea.Cmd {
 		a.statusbar.SetSyncing(false)
 		debuglog.Cache("ChannelSelectedMsg: channel=%s tier=3_spinner", m.ID)
 		tier = "3_spinner"
-		return tea.Batch(spinnerTickCmd(), fetchCmd())
+		return tea.Batch(spinnerTickCmd(), fetchCmd()), true
 	}
 }

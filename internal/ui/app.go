@@ -25,6 +25,7 @@ import (
 	"github.com/gammons/slk/internal/export"
 	"github.com/gammons/slk/internal/ids"
 	imgpkg "github.com/gammons/slk/internal/image"
+	"github.com/gammons/slk/internal/slackurl"
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/channelpicker"
 	"github.com/gammons/slk/internal/ui/compose"
@@ -32,6 +33,7 @@ import (
 	"github.com/gammons/slk/internal/ui/emojipicker"
 	"github.com/gammons/slk/internal/ui/help"
 	"github.com/gammons/slk/internal/ui/imgrender"
+	"github.com/gammons/slk/internal/ui/linkpicker"
 	"github.com/gammons/slk/internal/ui/mentionpicker"
 	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/newmessagepicker"
@@ -196,6 +198,9 @@ type App struct {
 	// tick fires. See reducer_io.go's EmojiImageReadyMsg arm.
 	emojiInvalidatePending bool
 
+	// linkPicker is the open-link choice modal (issue #62).
+	linkPicker *linkpicker.Model
+
 	// Reaction picker
 	reactionPicker *reactionpicker.Model
 	reactionsView  *reactionsview.Model
@@ -233,6 +238,21 @@ type App struct {
 	// channel in the sidebar when there is no saved entry or the saved
 	// channel is no longer in the list.
 	lastChannelByTeam map[string]string
+
+	// workspaceDomains maps teamID -> slack.com subdomain, recorded
+	// from WorkspaceReadyMsg / WorkspaceSwitchedMsg. Read by the link
+	// router to match permalink hosts against the active workspace.
+	workspaceDomains map[string]string
+
+	// pendingLinkNav tracks an in-flight permalink navigation: the
+	// channel was (or is being) opened and the message-select /
+	// thread-open completes when that channel's messages land. See
+	// reducer_links.go.
+	pendingLinkNav *pendingLinkNav
+
+	// browserOpener launches a URL in the OS browser. Defaults to
+	// openURLCmd; tests inject fakes.
+	browserOpener func(url string) tea.Cmd
 
 	// navHistory owns the per-workspace ctrl+h / ctrl+k browser-style
 	// jump list. See internal/ui/navhistory.go. Lazy-initialized on
@@ -372,6 +392,7 @@ func NewApp() *App {
 		threadPanel:          thread.New(),
 		threadCompose:        compose.New("thread"),
 		threadsView:          threadsview.New(nil, ""),
+		linkPicker:           linkpicker.New(),
 		reactionPicker:       reactionpicker.New(),
 		reactionsView:        reactionsview.New(),
 		confirmPrompt:        confirmprompt.New(),
@@ -397,6 +418,8 @@ func NewApp() *App {
 		messageSvc:           noopMessageService,
 		channels:             noopChannelService,
 		lastChannelByTeam:    map[string]string{},
+		workspaceDomains:     map[string]string{},
+		browserOpener:        openURLCmd,
 		navHistory:           newNavHistoryStore(),
 		clipboardRead:        defaultClipboardReader,
 	}
@@ -464,6 +487,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		reduceThreads,
 		reduceSend,
 		reduceChannels,
+		reduceLinks,
 		reduceWorkspace,
 		reduceNewMessagePicker,
 		reduceIO,
@@ -886,6 +910,63 @@ func (a *App) copyPermalinkOfSelected() tea.Cmd {
 	}
 }
 
+// openLinksOfSelected implements the `o` keybinding: collect the
+// links in the selected message (messages pane or thread panel).
+// 0 links -> toast; 1 link -> dispatch OpenLinkMsg directly; 2+ ->
+// open the link picker modal. All opens converge on OpenLinkMsg,
+// the single routing point in reducer_links.go.
+func (a *App) openLinksOfSelected() tea.Cmd {
+	var text string
+	switch a.focusedPanel {
+	case PanelMessages:
+		msg, ok := a.messagepane.SelectedMessage()
+		if !ok {
+			return nil
+		}
+		text = msg.Text
+	case PanelThread:
+		reply := a.threadPanel.SelectedReply()
+		if reply == nil {
+			return nil
+		}
+		text = reply.Text
+	default:
+		return nil
+	}
+	links := messages.ExtractLinks(text)
+	switch len(links) {
+	case 0:
+		return func() tea.Msg { return ToastMsg{Text: "No links in message"} }
+	case 1:
+		url := links[0].URL
+		return func() tea.Msg { return OpenLinkMsg{URL: url} }
+	default:
+		items := make([]linkpicker.Item, len(links))
+		for i, l := range links {
+			items[i] = linkpicker.Item{URL: l.URL, Label: l.Label, InApp: a.linkOpensInApp(l.URL)}
+		}
+		a.linkPicker.Open(items)
+		a.SetMode(ModeLinkPicker)
+		return nil
+	}
+}
+
+// linkOpensInApp reports whether routeLink would navigate this URL
+// inside slk (used for the picker's "[slk]" badge). Mirrors the
+// guards at the top of routeLink.
+func (a *App) linkOpensInApp(rawURL string) bool {
+	pl, ok := slackurl.Parse(rawURL)
+	if !ok {
+		return false
+	}
+	domain := a.activeWorkspaceDomain()
+	if domain == "" || pl.Subdomain != domain {
+		return false
+	}
+	_, _, found := a.channels.Lookup(pl.ChannelID)
+	return found
+}
+
 func (a *App) saveThreadToFile() tea.Cmd {
 	if a.focusedPanel != PanelThread {
 		return func() tea.Msg { return ToastMsg{Text: "Open a thread first"} }
@@ -1288,25 +1369,33 @@ func (a *App) openThreadForSelectedMessage() tea.Cmd {
 	if msg.ThreadTS != "" && msg.ThreadTS != msg.TS {
 		threadTS = msg.ThreadTS
 	}
+	return a.openThreadPanel(msg, a.activeChannelID, threadTS)
+}
+
+// openThreadPanel makes the thread panel visible for (channelID,
+// threadTS) with the given parent row, primes replies from the thread
+// cache, and returns a cmd that fetches authoritative replies. Shared
+// by openThreadForSelectedMessage (parent taken from the pane buffer)
+// and openThreadForPermalink (parent reconstructed from cache/stub).
+func (a *App) openThreadPanel(parent messages.MessageItem, channelID, threadTS string) tea.Cmd {
 	a.threadVisible = true
 	a.statusbar.SetInThread(true)
 	a.focusedPanel = PanelThread
-	a.threadPanel.SetThread(msg, nil, a.activeChannelID, threadTS)
+	a.threadPanel.SetThread(parent, nil, channelID, threadTS)
 	a.threadCompose.SetChannel("thread")
-	a.applyThreadUnreadBoundary(a.activeChannelID)
+	a.applyThreadUnreadBoundary(channelID)
 
 	threads := a.threads
-	chID := ids.ChannelID(a.activeChannelID)
-	ts := ids.ThreadTS(threadTS)
-	parentTS := threadTS
+	chID := ids.ChannelID(channelID)
+	tTS := ids.ThreadTS(threadTS)
 	var batch []tea.Cmd
-	if cached := threads.CacheRead(chID, ts); len(cached) > 1 {
+	if cached := threads.CacheRead(chID, tTS); len(cached) > 1 {
 		replies := cached[1:] // strip parent; reducer expects replies-only
 		batch = append(batch, func() tea.Msg {
-			return ThreadRepliesLoadedMsg{ThreadTS: parentTS, Replies: replies}
+			return ThreadRepliesLoadedMsg{ThreadTS: threadTS, Replies: replies}
 		})
 	}
-	batch = append(batch, func() tea.Msg { return threads.Fetch(chID, ts) })
+	batch = append(batch, func() tea.Msg { return threads.Fetch(chID, tTS) })
 	return tea.Batch(batch...)
 }
 
@@ -1925,17 +2014,40 @@ func openInSystemViewerCmd(path string) tea.Cmd {
 		if path == "" {
 			return nil
 		}
-		var cmd *exec.Cmd
-		switch runtime.GOOS {
-		case "darwin":
-			cmd = exec.Command("open", path)
-		case "windows":
-			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
-		default:
-			cmd = exec.Command("xdg-open", path)
-		}
-		if err := cmd.Start(); err != nil {
+		if err := launchOS(path); err != nil {
 			log.Printf("system viewer launch failed: %v", err)
+		}
+		return nil
+	}
+}
+
+// launchOS starts the platform's default handler for target (a URL or
+// file path): open (macOS), rundll32 (Windows), xdg-open (Linux).
+func launchOS(target string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", target)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
+	default:
+		cmd = exec.Command("xdg-open", target)
+	}
+	return cmd.Start()
+}
+
+// openURLCmd asynchronously launches the OS default browser for url.
+// Same launcher matrix as openInSystemViewerCmd (xdg-open / open /
+// rundll32). A failed launch surfaces a toast — unlike the image
+// viewer, the user otherwise gets no feedback at all.
+func openURLCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		if url == "" {
+			return nil
+		}
+		if err := launchOS(url); err != nil {
+			log.Printf("browser launch failed: %v", err)
+			return ToastMsg{Text: "Failed to open link"}
 		}
 		return nil
 	}
@@ -2116,6 +2228,13 @@ func (a *App) activeTeamName() string {
 		return a.activeTeamID
 	}
 	return "this workspace"
+}
+
+// activeWorkspaceDomain returns the slack.com subdomain of the active
+// workspace, or "" when unknown (link router then falls back to the
+// browser for all slack.com permalinks).
+func (a *App) activeWorkspaceDomain() string {
+	return a.workspaceDomains[a.activeTeamID]
 }
 
 // workspaceNameForActive returns the display name of the active workspace

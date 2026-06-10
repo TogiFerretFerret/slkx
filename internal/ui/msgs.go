@@ -181,8 +181,12 @@ type (
 		IsExternal bool
 	}
 	WorkspaceSwitchedMsg struct {
-		TeamID       string
-		TeamName     string
+		TeamID   string
+		TeamName string
+		// Domain is the workspace's slack.com subdomain (e.g.
+		// "truelist-workspace"), from auth.test. Used to decide
+		// whether an archive permalink belongs to this workspace.
+		Domain       string
 		Theme        string // resolved theme name (per-workspace or global default)
 		SidebarWidth int    // resolved sidebar width (per-workspace or global default)
 		Channels     []sidebar.ChannelItem
@@ -241,8 +245,12 @@ type (
 		MemberIDs []string
 	}
 	WorkspaceReadyMsg struct {
-		TeamID       string
-		TeamName     string
+		TeamID   string
+		TeamName string
+		// Domain is the workspace's slack.com subdomain (e.g.
+		// "truelist-workspace"), from auth.test. Used to decide
+		// whether an archive permalink belongs to this workspace.
+		Domain       string
 		Theme        string // resolved theme name (per-workspace or global default)
 		SidebarWidth int    // resolved sidebar width (per-workspace or global default)
 		Channels     []sidebar.ChannelItem
@@ -384,6 +392,14 @@ type MessageDeletedMsg struct {
 	TS        string
 	Err       error
 }
+
+// OpenLinkMsg requests that a URL be opened. This is the single
+// routing point for all link opens (issue #62): the reduceLinks
+// reducer either navigates in-app (Slack archive permalinks for the
+// active workspace) or launches the OS browser. Dispatched by the
+// `o` keybinding (directly for single-link messages) and by the link
+// picker modal.
+type OpenLinkMsg struct{ URL string }
 
 // MarkUnreadMsg requests the App to mark the given message as unread.
 // ThreadTS is "" for channel-level mark-unread; non-empty for thread-level

@@ -152,6 +152,9 @@ var reduceWorkspace reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 // (InitialActive activation branch alone is ~50).
 func reduceWorkspaceReady(a *App, m WorkspaceReadyMsg) tea.Cmd {
 	a.bootstrap.MarkReady(m.TeamName)
+	if m.Domain != "" {
+		a.workspaceDomains[m.TeamID] = m.Domain
+	}
 	var batch []tea.Cmd
 	// Only the workspace flagged InitialActive auto-claims active
 	// state. main.go computes this deterministically
@@ -222,6 +225,9 @@ func reduceWorkspaceReady(a *App, m WorkspaceReadyMsg) tea.Cmd {
 func reduceWorkspaceSwitched(a *App, m WorkspaceSwitchedMsg) tea.Cmd {
 	if a.compose.Uploading() || a.threadCompose.Uploading() {
 		return a.uploadToastCmd("Upload in progress", 2*time.Second)
+	}
+	if m.Domain != "" {
+		a.workspaceDomains[m.TeamID] = m.Domain
 	}
 	// Remember which channel we were on in the workspace we're
 	// leaving so that switching back lands the user on the same

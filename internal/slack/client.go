@@ -75,6 +75,11 @@ type Client struct {
 	// defaultAPIBaseURL until then.
 	apiBaseURL string
 
+	// teamURL is the raw workspace URL from auth.test's response
+	// (e.g. "https://truelist-workspace.slack.com/"). Used to derive
+	// the workspace subdomain for in-app permalink routing.
+	teamURL string
+
 	// httpClient is the cookie-bearing HTTP client used by both the
 	// inner slack-go client and the four hand-rolled endpoint calls.
 	// Stored so Connect() can rebuild the slack-go client with the
@@ -169,6 +174,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.teamID = resp.TeamID
 	c.userID = resp.UserID
 	c.apiBaseURL = deriveAPIBaseURL(resp.URL)
+	c.teamURL = resp.URL
 
 	if c.httpClient != nil {
 		c.api = slack.New(
@@ -202,6 +208,29 @@ func deriveAPIBaseURL(authTestURL string) string {
 		return defaultAPIBaseURL
 	}
 	return "https://" + host + "/api/"
+}
+
+// TeamSubdomain returns the workspace's subdomain under .slack.com
+// (e.g. "truelist-workspace" for truelist-workspace.slack.com), or ""
+// before Connect or when the auth.test URL was not a *.slack.com host.
+func (c *Client) TeamSubdomain() string {
+	return subdomainFromTeamURL(c.teamURL)
+}
+
+// subdomainFromTeamURL extracts the subdomain from a workspace URL.
+// Only hosts strictly under .slack.com produce a non-empty result.
+func subdomainFromTeamURL(teamURL string) string {
+	if teamURL == "" {
+		return ""
+	}
+	u, err := url.Parse(teamURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	if !strings.HasSuffix(u.Host, ".slack.com") {
+		return ""
+	}
+	return strings.TrimSuffix(u.Host, ".slack.com")
 }
 
 // wsUpgradeHeaders returns the HTTP headers slk attaches to the WebSocket
