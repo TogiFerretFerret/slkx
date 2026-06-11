@@ -36,16 +36,57 @@ func (a *App) newWindowModel(chName string) *messages.Model {
 
 // modelsForChannel returns the models of every window viewing chID,
 // in tree order. Used by channel-scoped event fan-out (Task 2).
+//
+// The FOCUSED window's channel is a.activeChannelID, not its tree
+// record. activeChannelID is the App-level invariant every pre-Phase-3
+// gate used ("does this event belong to the pane in view?"), and it is
+// what retargetActiveChannel / reduceChannelSelected keep authoritative
+// for the window in focus; the tree record is a label that can lag it
+// (see setFocusedWindowChannel's apply-time note) and that legacy
+// entry points like SetInitialChannel never write at all. Unfocused
+// windows have no App-level context, so their tree records route them.
 func (a *App) modelsForChannel(chID string) []*messages.Model {
 	if chID == "" {
 		return nil
 	}
 	var out []*messages.Model
 	for _, id := range a.wins.Leaves() {
-		if ch, ok := a.wins.Channel(id); ok && ch.ID == chID {
+		winChID := ""
+		if id == a.focusedWin {
+			winChID = a.activeChannelID
+		} else if ch, ok := a.wins.Channel(id); ok {
+			winChID = ch.ID
+		}
+		if winChID == chID {
 			if m := a.winModels[id]; m != nil {
 				out = append(out, m)
 			}
+		}
+	}
+	return out
+}
+
+// cloneMessageItems deep-copies a message slice for handing to a
+// model: a fresh top-level slice (covers in-place item writes:
+// SwapLocalSent, UpsertSelfSent, PatchUserName, UpdateMessageInPlace,
+// IncrementReplyCount, RemoveMessageByTS) AND a fresh Reactions slice
+// per item — UpdateReaction writes elements in place and shifts on
+// remove, so a shared backing array would let one window's reaction
+// event corrupt another window's view. ReactionItem.UserIDs needs no
+// copy: Append/RemoveUserID are copy-on-write. Attachments / Blocks /
+// LegacyAttachments are never mutated in place by the model.
+//
+// Preserves nil-ness: nil in, nil out (the nil-vs-empty distinction
+// matters to MessagesLoadedMsg's network-failure contract).
+func cloneMessageItems(items []messages.MessageItem) []messages.MessageItem {
+	if items == nil {
+		return nil
+	}
+	out := make([]messages.MessageItem, len(items))
+	copy(out, items)
+	for i := range out {
+		if len(out[i].Reactions) > 0 {
+			out[i].Reactions = append([]messages.ReactionItem(nil), out[i].Reactions...)
 		}
 	}
 	return out

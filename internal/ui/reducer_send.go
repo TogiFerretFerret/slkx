@@ -83,9 +83,9 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		a.selfSend.RecordSent(m.Message.TS)
-		if m.ChannelID == a.activeChannelID {
-			if !a.messagepane.SwapLocalSent(m.LocalTS, m.Message) {
-				a.messagepane.UpsertSelfSent(m.Message)
+		for _, mm := range a.modelsForChannel(m.ChannelID) {
+			if !mm.SwapLocalSent(m.LocalTS, m.Message) {
+				mm.UpsertSelfSent(m.Message)
 			}
 		}
 		return nil, true
@@ -94,8 +94,10 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		// The chat.postMessage HTTP call failed; roll back the
 		// optimistic placeholder so the user can see the send
 		// didn't go through. A toast surfaces the reason.
-		if m.ChannelID == a.activeChannelID && m.LocalTS != "" {
-			a.messagepane.RemoveLocalSent(m.LocalTS)
+		if m.LocalTS != "" {
+			for _, mm := range a.modelsForChannel(m.ChannelID) {
+				mm.RemoveLocalSent(m.LocalTS)
+			}
 		}
 		reason := m.Reason
 		return func() tea.Msg {
@@ -171,8 +173,8 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 	case WSMessageDeletedMsg:
 		debuglog.Cache("WSMessageDeletedMsg: channel=%s ts=%s active=%s",
 			m.ChannelID, m.TS, a.activeChannelID)
-		if m.ChannelID == a.activeChannelID {
-			a.messagepane.RemoveMessageByTS(m.TS)
+		for _, mm := range a.modelsForChannel(m.ChannelID) {
+			mm.RemoveMessageByTS(m.TS)
 		}
 		if m.ChannelID == a.threadPanel.ChannelID() {
 			a.threadPanel.RemoveMessageByTS(m.TS)
@@ -208,14 +210,14 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=skipped_edit_echo",
 			m.ChannelID, m.Message.TS)
 		// Edit echo: update existing message in place rather than
-		// appending. Gate on the active channel for the main pane
-		// and on the thread panel's channel for the thread cache
+		// appending. Fan out to every window viewing the channel;
+		// gate on the thread panel's channel for the thread cache
 		// -- avoids touching panes showing a different channel.
 		// This branch must run BEFORE the isSelfSent dedup below,
 		// since edits to messages we recently sent would otherwise
 		// be silently dropped (the TS is still in selfSentTSes).
-		if m.ChannelID == a.activeChannelID {
-			a.messagepane.UpdateMessageInPlace(m.Message.TS, m.Message.Text)
+		for _, mm := range a.modelsForChannel(m.ChannelID) {
+			mm.UpdateMessageInPlace(m.Message.TS, m.Message.Text)
 		}
 		if m.ChannelID == a.threadPanel.ChannelID() {
 			a.threadPanel.UpdateMessageInPlace(m.Message.TS, m.Message.Text)
@@ -249,34 +251,40 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 			m.ChannelID, m.Message.TS)
 		return nil
 	}
+	// Model writes fan out to EVERY window viewing the channel,
+	// focused or not (Phase 3): visible-but-unfocused windows show
+	// realtime traffic too.
+	for _, mm := range a.modelsForChannel(m.ChannelID) {
+		// Always add to the pane if it's a top-level message (no
+		// ThreadTS or is the parent); update the parent's reply
+		// count when a thread reply arrives.
+		if m.Message.ThreadTS == "" || m.Message.ThreadTS == m.Message.TS {
+			mm.AppendMessage(m.Message)
+		} else {
+			mm.IncrementReplyCount(m.Message.ThreadTS, m.Message.TS)
+		}
+	}
 	if m.ChannelID == a.activeChannelID {
 		// "active_channel_no_unread_bump": message arrived for the
-		// currently-viewed channel, so it's appended to the message
-		// pane (not skipped) but no unread bump is applied -- the
-		// user is actively reading.
+		// FOCUSED channel, so no unread bump is applied -- the user
+		// is actively reading (the read marker advances on focused
+		// entry via MarkChannel/MarkRead elsewhere).
 		debuglog.Cache("NewMessageMsg: channel=%s ts=%s decision=active_channel_no_unread_bump",
 			m.ChannelID, m.Message.TS)
 		// Route thread replies to the thread panel if it matches
-		// the open thread.
+		// the open thread. The panel follows the focused window
+		// (spec §7), so this keeps the legacy focused-channel gate.
 		if a.threadVisible && m.Message.ThreadTS == a.threadPanel.ThreadTS() {
 			a.threadPanel.AddReply(m.Message)
 		}
-		// Always add to main pane if it's a top-level message (no
-		// ThreadTS or is the parent).
-		if m.Message.ThreadTS == "" || m.Message.ThreadTS == m.Message.TS {
-			a.messagepane.AppendMessage(m.Message)
-		}
-		// Update reply count on parent message when a thread reply
-		// arrives.
-		if m.Message.ThreadTS != "" && m.Message.ThreadTS != m.Message.TS {
-			a.messagepane.IncrementReplyCount(m.Message.ThreadTS, m.Message.TS)
-		}
 	} else {
-		// Message arrived for a channel the user isn't currently
-		// viewing -- bump its unread count so the sidebar shows
-		// the dot + bold indicator. Active-channel messages are
-		// auto-marked-read elsewhere (MarkChannel on entry), so
-		// no sidebar update is needed there.
+		// Message arrived for a channel that is NOT focused -- bump
+		// its unread state so the sidebar shows the dot + bold
+		// indicator. This runs regardless of whether some UNFOCUSED
+		// window views the channel: the read marker only advances on
+		// focused entry, so a visible-but-unfocused window's channel
+		// is still unread. Only the focused channel is auto-marked-
+		// read (MarkChannel on entry), so only it skips the bump.
 		//
 		// Skip plain thread replies: a reply inside a thread does
 		// not mark the parent channel as unread on Slack -- only
@@ -323,11 +331,12 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	// MessageSentMsg / MessageSendFailedMsg handler can find and
 	// swap (or remove) it once the HTTP result lands.
 	//
-	// We only render the placeholder when the send is for the
-	// channel currently in view. For background sends (rare --
-	// would require sending while in a different view) we skip
-	// the placeholder; the HTTP response will fall back to
-	// UpsertSelfSent's append path.
+	// We only render the placeholder in windows viewing the send's
+	// channel (the focused window plus any same-channel siblings —
+	// they must show the optimistic message too). For background
+	// sends (rare -- would require sending while in a different
+	// view) no window matches and we skip the placeholder; the HTTP
+	// response will fall back to UpsertSelfSent's append path.
 	//
 	// Convert the user-typed CommonMark to Slack mrkdwn before
 	// rendering so the placeholder picks up bold / italic / code /
@@ -339,8 +348,8 @@ func reduceSendMessage(a *App, m SendMessageMsg) tea.Cmd {
 	// the common case (no rich_text_block paragraph quirks).
 	localTS := a.selfSend.NextLocalTS()
 	optimisticText, _ := mrkdwn.Convert(m.Text)
-	if m.ChannelID == a.activeChannelID {
-		a.messagepane.AppendMessage(messages.MessageItem{
+	for _, mm := range a.modelsForChannel(m.ChannelID) {
+		mm.AppendMessage(messages.MessageItem{
 			TS:        localTS,
 			UserID:    a.currentUserID,
 			UserName:  a.userNameFor(a.currentUserID),

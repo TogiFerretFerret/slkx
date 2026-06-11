@@ -91,34 +91,47 @@ var reduceChannels reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}
 		debuglog.Cache("MessagesLoadedMsg: channel=%s active=%s kind=%s count=%d",
 			m.ChannelID, a.activeChannelID, kind, len(m.Messages))
-		if m.ChannelID != a.activeChannelID {
-			return nil, true
+		// Fan out to every window viewing the channel, focused or
+		// not (Phase 3).
+		models := a.modelsForChannel(m.ChannelID)
+		if len(models) == 0 {
+			return nil, true // no window views this channel — stale fetch
 		}
-		a.statusbar.SetSyncing(false)
-		a.messagepane.SetLoading(false)
-		a.messagepane.SetLastReadTS(m.LastReadTS)
-		// nil Messages from the fetcher signals network FAILURE,
-		// not an empty channel (empty channels return
-		// []messages.MessageItem{}). On failure, preserve whatever
-		// the cache already rendered so a transient blip doesn't
-		// blank a working view. The Slack-side fetcher logs the
-		// error before returning nil.
-		if m.Messages != nil {
-			a.messagepane.SetMessages(m.Messages)
+		if m.ChannelID == a.activeChannelID {
+			a.statusbar.SetSyncing(false)
+		}
+		for _, mm := range models {
+			mm.SetLoading(false)
+			mm.SetLastReadTS(m.LastReadTS)
+			// nil Messages from the fetcher signals network FAILURE,
+			// not an empty channel (empty channels return
+			// []messages.MessageItem{}). On failure, preserve whatever
+			// the cache already rendered so a transient blip doesn't
+			// blank a working view. The Slack-side fetcher logs the
+			// error before returning nil. cloneMessageItems gives each
+			// window its own copy — two same-channel windows must not
+			// alias one slice (in-place model writes would cross-leak).
+			if m.Messages != nil {
+				mm.SetMessages(cloneMessageItems(m.Messages))
+			}
 		}
 		// Authoritative permalink completion: this is the freshest
-		// data we'll get for this channel.
-		return a.completePendingLinkNav(m.ChannelID, true), true
+		// data we'll get for this channel. Focused-window semantics
+		// (completePendingLinkNav selects in a.messagepane), so keep
+		// the legacy active-channel gate.
+		if m.ChannelID == a.activeChannelID {
+			return a.completePendingLinkNav(m.ChannelID, true), true
+		}
+		return nil, true
 
 	case OlderMessagesLoadedMsg:
 		debuglog.Cache("OlderMessagesLoadedMsg: channel=%s active=%s count=%d",
 			m.ChannelID, a.activeChannelID, len(m.Messages))
-		if m.ChannelID != a.activeChannelID {
-			return nil, true
+		delete(a.fetchingOlder, m.ChannelID)
+		for _, mm := range a.modelsForChannel(m.ChannelID) {
+			mm.SetLoading(false)
+			mm.PrependMessages(cloneMessageItems(m.Messages))
 		}
-		a.fetchingOlder = false
-		a.messagepane.SetLoading(false)
-		a.messagepane.PrependMessages(m.Messages)
 		return nil, true
 
 	case ChannelMarkedRemoteMsg:

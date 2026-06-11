@@ -246,8 +246,8 @@ var reduceThreads reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 				a.threadPanel.UpsertSelfSentReply(m.Message)
 			}
 		}
-		if m.ChannelID == a.activeChannelID {
-			a.messagepane.IncrementReplyCount(m.ThreadTS, m.Message.TS)
+		for _, mm := range a.modelsForChannel(m.ChannelID) {
+			mm.IncrementReplyCount(m.ThreadTS, m.Message.TS)
 		}
 		if c := a.scheduleThreadsDirty(); c != nil {
 			return c, true

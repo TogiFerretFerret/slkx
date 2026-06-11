@@ -16,6 +16,10 @@ func TestReactionSentMsgRollsBackOnFailure(t *testing.T) {
 	a := NewApp()
 	_, _ = a.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
 	a.SetCurrentUserID("ME")
+	// Make C1 the focused window's channel: reaction writes are
+	// channel-scoped (fan-out to windows viewing the channel), so the
+	// pane only receives them once it actually views C1.
+	_, _ = a.Update(ChannelSelectedMsg{ID: "C1", Name: "general", Type: "channel"})
 	a.messagepane.SetMessages([]messages.MessageItem{{TS: "100.0", Text: "hi"}})
 
 	// Optimistic add, exactly as the toggle/picker paths do before the call.
@@ -40,6 +44,9 @@ func TestReactionSentMsgKeepsOptimisticOnSuccess(t *testing.T) {
 	a := NewApp()
 	_, _ = a.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
 	a.SetCurrentUserID("ME")
+	// See TestReactionSentMsgRollsBackOnFailure: channel-scoped
+	// reaction writes need the pane to actually view C1.
+	_, _ = a.Update(ChannelSelectedMsg{ID: "C1", Name: "general", Type: "channel"})
 	a.messagepane.SetMessages([]messages.MessageItem{{TS: "100.0", Text: "hi"}})
 	a.updateReactionOnMessage("C1", "100.0", "tada", "ME", false)
 

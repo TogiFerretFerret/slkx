@@ -22,7 +22,7 @@ func TestHandleUp_BackfillEmitsSpinnerTick(t *testing.T) {
 	app.focusedPanel = PanelMessages
 	app.view = ViewChannels
 	app.bootstrap.loading = false
-	app.fetchingOlder = false
+	delete(app.fetchingOlder, "C1")
 
 	// Two messages with selection at index 0 -> AtTop() == true.
 	app.messagepane.SetMessages([]messages.MessageItem{
@@ -54,8 +54,8 @@ func TestHandleUp_BackfillEmitsSpinnerTick(t *testing.T) {
 	if !called {
 		t.Fatal("expected fetcher cmd to also have been dispatched")
 	}
-	if !app.fetchingOlder {
-		t.Fatal("expected fetchingOlder=true after dispatch")
+	if !app.fetchingOlder["C1"] {
+		t.Fatal("expected fetchingOlder[C1]=true after dispatch")
 	}
 }
 
@@ -70,7 +70,7 @@ func TestScrollFocusedPanel_BackfillAtViewportTop(t *testing.T) {
 	app.focusedPanel = PanelMessages
 	app.view = ViewChannels
 	app.bootstrap.loading = false
-	app.fetchingOlder = false
+	delete(app.fetchingOlder, "C1")
 	app.layout.msgHeight = 20
 
 	app.messagepane.SetMessages([]messages.MessageItem{
@@ -104,7 +104,7 @@ func TestScrollFocusedPanel_BackfillAtViewportTop(t *testing.T) {
 	if !called {
 		t.Fatal("expected fetcher cmd to have been dispatched from PageUp")
 	}
-	if !app.fetchingOlder {
-		t.Fatal("expected fetchingOlder=true after PageUp dispatch")
+	if !app.fetchingOlder["C1"] {
+		t.Fatal("expected fetchingOlder[C1]=true after PageUp dispatch")
 	}
 }

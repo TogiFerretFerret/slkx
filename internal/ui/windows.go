@@ -13,7 +13,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/gammons/slk/internal/ui/messages"
 	"github.com/gammons/slk/internal/ui/wintree"
 )
 
@@ -68,23 +67,10 @@ func (a *App) splitWindow(dir wintree.Dir) tea.Cmd {
 	m.SetChannel(srcCh.Name, "")
 	m.SetChannelType(srcCh.Type)
 	if src != nil {
-		// Messages() exposes the source's internal slice. Copy the
-		// top-level items (covers in-place item writes: SwapLocalSent,
-		// UpsertSelfSent, PatchUserName, UpdateMessageInPlace,
-		// IncrementReplyCount, RemoveMessageByTS) AND each item's
-		// Reactions slice — UpdateReaction writes elements in place
-		// and shifts on remove, so a shared backing array would let
-		// one window's reaction event corrupt the other's view.
-		// ReactionItem.UserIDs needs no copy: Append/RemoveUserID are
-		// copy-on-write. Attachments/Blocks/LegacyAttachments are
-		// never mutated in place by the model.
-		items := append([]messages.MessageItem(nil), src.Messages()...)
-		for i := range items {
-			if len(items[i].Reactions) > 0 {
-				items[i].Reactions = append([]messages.ReactionItem(nil), items[i].Reactions...)
-			}
-		}
-		m.SetMessages(items)
+		// Messages() exposes the source's internal slice; the seed
+		// must be a deep copy (see cloneMessageItems in winmodels.go
+		// for the aliasing hazards it covers).
+		m.SetMessages(cloneMessageItems(src.Messages()))
 		m.SetLastReadTS(src.LastReadTS())
 		m.SetLoading(src.IsLoading())
 	}

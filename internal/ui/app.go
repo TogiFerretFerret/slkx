@@ -183,7 +183,11 @@ type App struct {
 	threads ThreadService
 
 	threadsDirtyDebounce time.Duration
-	fetchingOlder        bool
+	// fetchingOlder tracks in-flight older-history backfills per
+	// channel ID (Phase 3: a global bool would let one window's
+	// backfill block another channel's, and a fetch completing for
+	// a no-longer-viewed channel must still clear its own flag).
+	fetchingOlder map[string]bool
 
 	// Cached user-id -> display-name map (mirror of what SetUserNames
 	// last received). Used by openSelectedThreadCmd to populate the
@@ -443,6 +447,7 @@ func NewApp() *App {
 		bootstrap:            newWorkspaceBootstrap(),
 		windowTitle:          "slk",
 		threadsDirtyDebounce: 150 * time.Millisecond,
+		fetchingOlder:        map[string]bool{},
 		mouseWheelLines:      3,
 		userNames:            map[string]string{},
 		externalUsers:        map[string]bool{},
@@ -700,7 +705,14 @@ func (a *App) walkNavCmd(step int) tea.Cmd {
 // handleConfirmMode moved to mode_confirm.go (Phase 5j).
 
 func (a *App) updateReactionOnMessage(channelID, messageTS, emojiName, userID string, remove bool) {
-	a.messagepane.UpdateReaction(messageTS, emojiName, userID, remove)
+	// Pane writes fan out to every window viewing the channel
+	// (per-window models deep-copy Reactions at clone/load time, so
+	// per-model in-place updates can't cross-leak). The thread panel
+	// is a singleton following the focused window; its write is
+	// unconditional as before — UpdateReaction no-ops on a missing TS.
+	for _, mm := range a.modelsForChannel(channelID) {
+		mm.UpdateReaction(messageTS, emojiName, userID, remove)
+	}
 	a.threadPanel.UpdateReaction(messageTS, emojiName, userID, remove)
 }
 
@@ -1322,10 +1334,12 @@ func (a *App) scrollFocusedPanel(delta int) tea.Cmd {
 // Returns nil otherwise. Centralizes the spinner-tick + fetch-cmd batching
 // previously duplicated across handleUp / the mouse-wheel handler / page-up.
 func (a *App) maybeFetchOlderHistory(atTop bool) tea.Cmd {
-	if !atTop || a.fetchingOlder {
+	// Backfill is triggered by focused-window scrolling, so the
+	// gate/set are keyed by the focused channel.
+	if !atTop || a.fetchingOlder[a.activeChannelID] {
 		return nil
 	}
-	a.fetchingOlder = true
+	a.fetchingOlder[a.activeChannelID] = true
 	a.messagepane.SetLoading(true)
 	chID := ids.ChannelID(a.activeChannelID)
 	oldestTS := ids.MessageTS(a.messagepane.OldestTS())
@@ -2800,8 +2814,8 @@ func (a *App) notifyReadStateChanged() {
 func (a *App) applyChannelMark(channelID, ts string, unreadCount int) {
 	debuglog.Cache("applyChannelMark: channel=%s ts=%s unread_count=%d active=%s",
 		channelID, ts, unreadCount, a.activeChannelID)
-	if channelID == a.activeChannelID {
-		a.messagepane.SetLastReadTS(ts)
+	for _, mm := range a.modelsForChannel(channelID) {
+		mm.SetLastReadTS(ts)
 	}
 	a.notifyReadStateChanged()
 }
