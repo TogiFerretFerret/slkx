@@ -17,6 +17,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+
 	"charm.land/lipgloss/v2"
 	"github.com/gammons/slk/internal/cache"
 	"github.com/gammons/slk/internal/config"
@@ -892,9 +894,11 @@ func (a *App) copyPermalinkOfSelected() tea.Cmd {
 	messageSvc := a.messageSvc
 	cID := ids.ChannelID(channelID)
 	mTS := ids.MessageTS(ts)
+	
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		
 		url, err := messageSvc.Permalink(ctx, cID, mTS)
 		if err != nil {
 			log.Printf("copy permalink: %v", err)
@@ -906,12 +910,13 @@ func (a *App) copyPermalinkOfSelected() tea.Cmd {
 			// false success toast.
 			return nil
 		}
-		return tea.BatchMsg{
-			tea.SetClipboard(url),
-			func() tea.Msg { return statusbar.PermalinkCopiedMsg{} },
-		}
+
+		_ = clipboard.Write(clipboard.FmtText, []byte(url))
+
+		return statusbar.PermalinkCopiedMsg{}
 	}
 }
+
 
 // openLinksOfSelected implements the `o` keybinding: collect the
 // links in the selected message (messages pane or thread panel).
