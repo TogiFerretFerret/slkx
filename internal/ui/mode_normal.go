@@ -3,8 +3,8 @@
 // Normal-mode key handler (Phase 5k).
 //
 // The bulk of slk's keybinding surface lives here:
-//   - mode entry: i (insert), Ctrl-T (channel finder), Ctrl-W
-//     (workspace finder), Ctrl-T (theme switcher), ? (help),
+//   - mode entry: i (insert), Ctrl-T (channel finder), : (command
+//     prompt), Ctrl-T (theme switcher), ? (help),
 //     S (presence menu), R (reaction picker)
 //   - navigation: j/k (selection), Ctrl-D/U (half-page), C-f/b
 //     (page), G (bottom), Tab/h/l (focus next/prev), Ctrl-o/i
@@ -53,6 +53,9 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 		}
 		a.focusedPanel = PanelMessages
 		return a.compose.Focus()
+
+	case key.Matches(msg, a.keys.CommandMode):
+		a.enterCommandMode()
 
 	case key.Matches(msg, a.keys.Escape):
 		a.cancelEdit()
@@ -155,10 +158,6 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 		a.help.SetEntries(help.FromKeyMap(a.keys))
 		a.help.Open()
 		a.SetMode(ModeHelp)
-
-	case key.Matches(msg, a.keys.WorkspaceFinder):
-		a.workspaceFinder.Open()
-		a.SetMode(ModeWorkspaceFinder)
 
 	case key.Matches(msg, a.keys.ThemeSwitcher):
 		// Per-workspace scope. Header text shows the current

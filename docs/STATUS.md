@@ -11,7 +11,7 @@ Last updated: 2026-05-03
 - [x] Slack API client (Web API via slack-go)
 - [x] OAuth token storage (JSON files, per-workspace)
 - [x] Interactive onboarding (`--add-workspace` with huh forms)
-- [x] Multi-workspace runtime switching (1-9 number keys + Ctrl+w picker)
+- [x] Multi-workspace runtime switching (1-9 number keys + :ws picker)
 - [x] All workspaces maintain live WebSocket connections with real-time unread badges
 - [x] Parallel workspace connection at startup with loading overlay
 - [x] Browser cookie auth (xoxc/xoxd) -- connect using browser session tokens, no Slack App needed
@@ -144,7 +144,7 @@ slk/
 │       ├── thread/          # Thread panel with viewport + reply compose
 │       ├── channelfinder/   # Ctrl+t/Ctrl+p fuzzy channel finder overlay
 │       ├── reactionpicker/  # Reaction picker overlay with emoji search
-│       ├── workspacefinder/ # Ctrl+w workspace picker overlay
+│       ├── workspacefinder/ # :ws workspace picker overlay
 │       ├── compose/         # Multi-line message input (textarea)
 │       └── statusbar/       # Bottom status bar with connection state
 ├── docs/
