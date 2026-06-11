@@ -33,6 +33,7 @@ type Model struct {
 	dndEndTS    time.Time // zero if not in DND
 	syncing     bool      // true while a background cache-verify fetch is in flight
 	helpHint    string    // muted text rendered in the gap area; empty disables
+	commandLine string    // "" == inactive; otherwise the :prompt shown in place of channel/workspace
 	version     int64
 }
 
@@ -149,6 +150,17 @@ func (m *Model) SetHelpHint(s string) {
 	}
 }
 
+// SetCommandLine shows a vi-style command prompt (e.g. ":vsp") in the
+// left segment of the bar, replacing the channel/workspace segments
+// while non-empty. Pass "" to restore the normal segments. The caller
+// owns the ':' prefix and any cursor glyph.
+func (m *Model) SetCommandLine(s string) {
+	if m.commandLine != s {
+		m.commandLine = s
+		m.dirty()
+	}
+}
+
 // SetToast displays an arbitrary string in the right-side toast slot. Pass ""
 // to clear. Callers are responsible for clearing the toast (typically via a
 // tea.Tick that delivers CopiedClearMsg).
@@ -252,7 +264,13 @@ func (m Model) View(width int) string {
 			lipgloss.NewStyle().Foreground(styles.Error).Background(styles.SurfaceDark).Render("● Disconnected"))
 	}
 
-	left := lipgloss.JoinHorizontal(lipgloss.Center, modeLabel, channelInfo, wsInfo)
+	var left string
+	if m.commandLine != "" {
+		cmdInfo := styles.StatusBar.Render(fmt.Sprintf(" %s▌ ", m.commandLine))
+		left = lipgloss.JoinHorizontal(lipgloss.Center, modeLabel, cmdInfo)
+	} else {
+		left = lipgloss.JoinHorizontal(lipgloss.Center, modeLabel, channelInfo, wsInfo)
+	}
 
 	// Render separators and trailing padding with the SurfaceDark background so
 	// the right-side pills read as one continuous bar even when the terminal's
