@@ -13,6 +13,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/gammons/slk/internal/ui/wintree"
 )
 
 // commandFunc executes a named :command. args holds the
@@ -23,7 +25,26 @@ type commandFunc func(a *App, args []string) tea.Cmd
 // commands maps a command name to its handler. Names are matched
 // exactly (no prefix matching); aliases get their own entries.
 var commands = map[string]commandFunc{
-	"ws": cmdWorkspaceFinder,
+	"ws":   cmdWorkspaceFinder,
+	"sp":   cmdSplit,
+	"vsp":  cmdVSplit,
+	"q":    cmdCloseWindow,
+	"only": cmdOnlyWindow,
+	"on":   cmdOnlyWindow,
+}
+
+// cmdSplit / cmdVSplit create a stacked / side-by-side split of the
+// focused window (window-management design §5).
+func cmdSplit(a *App, _ []string) tea.Cmd  { return a.splitWindow(wintree.SplitStacked) }
+func cmdVSplit(a *App, _ []string) tea.Cmd { return a.splitWindow(wintree.SplitSideBySide) }
+
+// cmdCloseWindow closes the focused window (never quits the app).
+func cmdCloseWindow(a *App, _ []string) tea.Cmd { return a.closeWindow() }
+
+// cmdOnlyWindow closes all other windows.
+func cmdOnlyWindow(a *App, _ []string) tea.Cmd {
+	a.onlyWindow()
+	return nil
 }
 
 // cmdWorkspaceFinder opens the workspace finder overlay —

@@ -271,6 +271,9 @@ func reduceChannelSelected(a *App, m ChannelSelectedMsg) (tea.Cmd, bool) {
 	}
 	a.statusbar.SetChannel(m.Name)
 	a.statusbar.SetChannelType(m.Type)
+	// Record the applied selection on the focused window so window
+	// focus changes can re-dispatch it (see internal/ui/windows.go).
+	a.setFocusedWindowChannel(m.ID, m.Name, m.Type)
 
 	cached := a.channels.ReadCache(ids.ChannelID(m.ID))
 	syncedAt := a.channels.SyncedAt(ids.ChannelID(m.ID))

@@ -46,6 +46,7 @@ import (
 	"github.com/gammons/slk/internal/ui/themeswitcher"
 	"github.com/gammons/slk/internal/ui/thread"
 	"github.com/gammons/slk/internal/ui/threadsview"
+	"github.com/gammons/slk/internal/ui/wintree"
 	"github.com/gammons/slk/internal/ui/workspace"
 	"github.com/gammons/slk/internal/ui/workspacefinder"
 	"golang.design/x/clipboard"
@@ -114,6 +115,13 @@ type App struct {
 	// while in ModeCommand. Owned by mode_command.go; always "" in
 	// every other mode.
 	cmdline string
+
+	// wins is the vim-style window tree subdividing the messages
+	// region; focusedWin is the active window within it. Phase 2:
+	// the focused window renders the single live messages model,
+	// unfocused windows render placeholders.
+	wins       *wintree.Tree
+	focusedWin wintree.LeafID
 
 	// layout owns the per-frame layout geometry (horizontal bands for
 	// mouse hit-testing + per-pane content heights for pageSize). See
@@ -382,6 +390,9 @@ type App struct {
 }
 
 func NewApp() *App {
+	// The window tree starts as a single window with no channel; the
+	// first ChannelSelectedMsg apply records the channel on it.
+	wins, rootWin := wintree.New(wintree.Channel{})
 	app := &App{
 		workspaceRail:        workspace.New(nil, 0),
 		sidebar:              sidebar.New(nil),
@@ -403,6 +414,8 @@ func NewApp() *App {
 		confirmPrompt:        confirmprompt.New(),
 		mode:                 ModeNormal,
 		focusedPanel:         PanelSidebar,
+		wins:                 wins,
+		focusedWin:           rootWin,
 		sidebarVisible:       true,
 		view:                 ViewChannels,
 		keys:                 DefaultKeyMap(),
