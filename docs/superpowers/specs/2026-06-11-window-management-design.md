@@ -193,3 +193,9 @@ behavior; reopening is one keypress).
    channel retargeting, read-state rule.
 4. **Integration polish** — thread-follow behavior, mouse routing and
    drag-resize, focus cycling, help overlay entries, resize chords.
+   Plus two tracked gaps deferred from Phase 3 (deliberate, not
+   discovered): (a) focusing a window does not advance its channel's
+   read marker — only sidebar/finder selection does, so an unread dot
+   on a visible split can't be cleared by ctrl+w focus alone; (b)
+   typing indicators render only in the focused window (typing state
+   is already per-channel; unfocused panes omit the row).
