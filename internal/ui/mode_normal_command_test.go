@@ -29,10 +29,16 @@ func TestNormalMode_CtrlWNoLongerOpensWorkspaceFinder(t *testing.T) {
 
 func TestHelp_StillListsWorkspaceFinderViaWS(t *testing.T) {
 	entries := help.FromKeyMap(DefaultKeyMap())
+	found := false
 	for _, e := range entries {
+		if e.Key == "ctrl+w" {
+			t.Fatalf("help entry %+v still advertises ctrl+w (reserved as window prefix)", e)
+		}
 		if e.Key == ":ws" && e.Desc == "switch workspace" {
-			return
+			found = true
 		}
 	}
-	t.Fatal("help entries missing {Key: \":ws\", Desc: \"switch workspace\"}")
+	if !found {
+		t.Fatal("help entries missing {Key: \":ws\", Desc: \"switch workspace\"}")
+	}
 }
