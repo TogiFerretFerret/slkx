@@ -154,7 +154,7 @@ func TestOnMessage_InactiveChannel_SetsHasUnread(t *testing.T) {
 		isActive:        func() bool { return true },
 		activeChannelID: func() string { return "C2" }, // viewing a different channel
 	}
-	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil)
+	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {
@@ -171,7 +171,7 @@ func TestOnMessage_ActiveChannel_DoesNotSetHasUnread(t *testing.T) {
 		isActive:        func() bool { return true },
 		activeChannelID: func() string { return "C1" }, // viewing the same channel
 	}
-	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil)
+	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if s.HasUnread {
@@ -189,7 +189,7 @@ func TestOnMessage_InactiveWorkspace_StillSetsHasUnread(t *testing.T) {
 		activeChannelID: func() string { return "" },
 		workspaceID:     "T1",
 	}
-	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil)
+	h.OnMessage("C1", "U1", "1.001", "hi", "", "", false, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {
@@ -207,7 +207,7 @@ func TestOnMessage_ThreadReply_DoesNotSetHasUnread(t *testing.T) {
 		activeChannelID: func() string { return "C2" },
 	}
 	// threadTS != ts and not a broadcast subtype = non-broadcast thread reply.
-	h.OnMessage("C1", "U1", "1.002", "reply", "1.001", "", false, nil, slack.Blocks{}, nil)
+	h.OnMessage("C1", "U1", "1.002", "reply", "1.001", "", false, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if s.HasUnread {
@@ -224,7 +224,7 @@ func TestOnMessage_ThreadBroadcast_SetsHasUnread(t *testing.T) {
 		isActive:        func() bool { return true },
 		activeChannelID: func() string { return "C2" },
 	}
-	h.OnMessage("C1", "U1", "1.002", "ALL", "1.001", "thread_broadcast", false, nil, slack.Blocks{}, nil)
+	h.OnMessage("C1", "U1", "1.002", "ALL", "1.001", "thread_broadcast", false, nil, slack.Blocks{}, nil, "", "")
 
 	s, _ := db.GetChannelReadState("C1")
 	if !s.HasUnread {

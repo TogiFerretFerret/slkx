@@ -16,7 +16,7 @@ type EventHandler interface {
 	// for bot posts, "thread_broadcast" for thread replies that the
 	// author also sent to the main channel. files carries any file
 	// attachments on the message (empty for plain text messages).
-	OnMessage(channelID, userID, ts, text, threadTS, subtype string, edited bool, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment)
+	OnMessage(channelID, userID, ts, text, threadTS, subtype string, edited bool, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment, botID, username string)
 	OnMessageDeleted(channelID, ts string)
 	OnReactionAdded(channelID, ts, userID, emoji string)
 	OnReactionRemoved(channelID, ts, userID, emoji string)
@@ -96,14 +96,16 @@ type wsEvent struct {
 
 // wsMessageEvent represents a message event from the WebSocket.
 type wsMessageEvent struct {
-	Type            string       `json:"type"`
-	SubType         string       `json:"subtype"`
-	Channel         string       `json:"channel"`
-	User            string       `json:"user"`
-	Text            string       `json:"text"`
-	TS              string       `json:"ts"`
-	ThreadTS        string       `json:"thread_ts"`
-	DeletedTS       string       `json:"deleted_ts"`
+	Type            string             `json:"type"`
+	SubType         string             `json:"subtype"`
+	Channel         string             `json:"channel"`
+	User            string             `json:"user"`
+	BotID           string             `json:"bot_id"`   // set on bot_message (no User)
+	Username        string             `json:"username"` // bot display name on bot_message
+	Text            string             `json:"text"`
+	TS              string             `json:"ts"`
+	ThreadTS        string             `json:"thread_ts"`
+	DeletedTS       string             `json:"deleted_ts"`
 	Files           []slack.File       `json:"files"`
 	Blocks          slack.Blocks       `json:"blocks"`
 	Attachments     []slack.Attachment `json:"attachments"`
@@ -114,6 +116,8 @@ type wsMessageEvent struct {
 // wsSubMsg is the inner message for message_changed events.
 type wsSubMsg struct {
 	User        string             `json:"user"`
+	BotID       string             `json:"bot_id"`
+	Username    string             `json:"username"`
 	Text        string             `json:"text"`
 	TS          string             `json:"ts"`
 	ThreadTS    string             `json:"thread_ts"`
@@ -288,12 +292,12 @@ func dispatchWebSocketEvent(data []byte, handler EventHandler) {
 			// this subtype).
 			debuglog.WS("message: channel=%s user=%s ts=%s subtype=%q thread_ts=%s files=%d",
 				msg.Channel, msg.User, msg.TS, msg.SubType, msg.ThreadTS, len(msg.Files))
-			handler.OnMessage(msg.Channel, msg.User, msg.TS, msg.Text, msg.ThreadTS, msg.SubType, false, msg.Files, msg.Blocks, msg.Attachments)
+			handler.OnMessage(msg.Channel, msg.User, msg.TS, msg.Text, msg.ThreadTS, msg.SubType, false, msg.Files, msg.Blocks, msg.Attachments, msg.BotID, msg.Username)
 		case "message_changed":
 			if msg.Message != nil {
 				debuglog.WS("message_changed: channel=%s user=%s ts=%s thread_ts=%s edited=true",
 					msg.Channel, msg.Message.User, msg.Message.TS, msg.Message.ThreadTS)
-				handler.OnMessage(msg.Channel, msg.Message.User, msg.Message.TS, msg.Message.Text, msg.Message.ThreadTS, "", true, msg.Message.Files, msg.Message.Blocks, msg.Message.Attachments)
+				handler.OnMessage(msg.Channel, msg.Message.User, msg.Message.TS, msg.Message.Text, msg.Message.ThreadTS, "", true, msg.Message.Files, msg.Message.Blocks, msg.Message.Attachments, msg.Message.BotID, msg.Message.Username)
 			}
 		case "message_deleted":
 			debuglog.WS("message_deleted: channel=%s deleted_ts=%s", msg.Channel, msg.DeletedTS)

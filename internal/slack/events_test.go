@@ -26,6 +26,9 @@ type mockEventHandler struct {
 	dndChanges          []dndChangeRecord
 	lastBlocks          slack.Blocks
 	lastAttachments     []slack.Attachment
+	lastUserID          string
+	lastBotID           string
+	lastUsername        string
 
 	channelMarks     []channelMarkRecord
 	threadMarks      []threadMarkRecord
@@ -72,11 +75,14 @@ type threadSubChangeRecord struct {
 	active                        bool
 }
 
-func (m *mockEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subtype string, edited bool, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment) {
+func (m *mockEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subtype string, edited bool, files []slack.File, blocks slack.Blocks, attachments []slack.Attachment, botID, username string) {
 	m.messages = append(m.messages, text)
 	m.subtypes = append(m.subtypes, subtype)
 	m.lastBlocks = blocks
 	m.lastAttachments = attachments
+	m.lastUserID = userID
+	m.lastBotID = botID
+	m.lastUsername = username
 }
 
 func (m *mockEventHandler) OnMessageDeleted(channelID, ts string) {
@@ -149,7 +155,7 @@ func TestEventHandlerInterface(t *testing.T) {
 	handler := &mockEventHandler{}
 	var _ EventHandler = handler
 
-	handler.OnMessage("C1", "U1", "123.456", "hello", "", "", false, nil, slack.Blocks{}, nil)
+	handler.OnMessage("C1", "U1", "123.456", "hello", "", "", false, nil, slack.Blocks{}, nil, "", "")
 	if len(handler.messages) != 1 || handler.messages[0] != "hello" {
 		t.Error("expected message to be recorded")
 	}
@@ -172,7 +178,7 @@ func TestDispatchWebSocketMessageEvent(t *testing.T) {
 func TestDispatchWebSocketBotMessageEvent(t *testing.T) {
 	handler := &mockEventHandler{}
 
-	data := []byte(`{"type":"message","subtype":"bot_message","channel":"C1","text":"bot says hi","ts":"123.456","bot_id":"B123"}`)
+	data := []byte(`{"type":"message","subtype":"bot_message","channel":"C1","text":"bot says hi","ts":"123.456","bot_id":"B123","username":"Deploybot"}`)
 	dispatchWebSocketEvent(data, handler)
 
 	if len(handler.messages) != 1 {
@@ -180,6 +186,17 @@ func TestDispatchWebSocketBotMessageEvent(t *testing.T) {
 	}
 	if handler.messages[0] != "bot says hi" {
 		t.Errorf("expected 'bot says hi', got %q", handler.messages[0])
+	}
+	// bot_message has no user; the bot_id + username must flow through so
+	// the handler can key identity/avatar on the bot.
+	if handler.lastUserID != "" {
+		t.Errorf("expected empty userID on bot_message, got %q", handler.lastUserID)
+	}
+	if handler.lastBotID != "B123" {
+		t.Errorf("expected bot_id B123, got %q", handler.lastBotID)
+	}
+	if handler.lastUsername != "Deploybot" {
+		t.Errorf("expected username Deploybot, got %q", handler.lastUsername)
 	}
 }
 
@@ -326,8 +343,8 @@ func TestDispatchWebSocketDNDUpdatedUserEvent_NoDND(t *testing.T) {
 func TestDispatchWebSocketDNDUpdatedEvent_InScheduledWindow(t *testing.T) {
 	// User is currently inside the scheduled DND window.
 	now := time.Now().Unix()
-	start := now - 600           // 10 min ago
-	end := now + 3600             // 1h from now
+	start := now - 600 // 10 min ago
+	end := now + 3600  // 1h from now
 	handler := &mockEventHandler{}
 	data := []byte(fmt.Sprintf(
 		`{"type":"dnd_updated","dnd_status":{"dnd_enabled":true,"snooze_enabled":false,"snooze_endtime":0,"next_dnd_start_ts":%d,"next_dnd_end_ts":%d}}`,
@@ -347,8 +364,8 @@ func TestDispatchWebSocketDNDUpdatedEvent_BetweenSchedules(t *testing.T) {
 	// the next scheduled window starts. dnd_enabled=true is just "schedule
 	// exists" — must NOT be interpreted as "currently in DND".
 	now := time.Now().Unix()
-	start := now + 3600  // 1h from now
-	end := now + 7200    // 2h from now
+	start := now + 3600 // 1h from now
+	end := now + 7200   // 2h from now
 	handler := &mockEventHandler{}
 	data := []byte(fmt.Sprintf(
 		`{"type":"dnd_updated","dnd_status":{"dnd_enabled":true,"snooze_enabled":false,"snooze_endtime":0,"next_dnd_start_ts":%d,"next_dnd_end_ts":%d}}`,

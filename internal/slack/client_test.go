@@ -180,6 +180,10 @@ func (m *mockSlackAPI) GetUserInfo(user string) (*slack.User, error) {
 	return nil, fmt.Errorf("user not found")
 }
 
+func (m *mockSlackAPI) GetBotInfoContext(ctx context.Context, parameters slack.GetBotInfoParameters) (*slack.Bot, error) {
+	return nil, fmt.Errorf("bot not found")
+}
+
 func (m *mockSlackAPI) GetUsersContext(ctx context.Context, options ...slack.GetUsersOption) ([]slack.User, error) {
 	return nil, nil
 }

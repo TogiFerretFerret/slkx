@@ -1,5 +1,6 @@
 bin/
 dist/
+/slk
 *.db
 *.db-journal
 .superpowers/

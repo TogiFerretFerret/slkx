@@ -29,6 +29,7 @@ type SlackAPI interface {
 	GetUsersContext(ctx context.Context, options ...slack.GetUsersOption) ([]slack.User, error)
 	GetUsersInConversationContext(ctx context.Context, params *slack.GetUsersInConversationParameters) ([]string, string, error)
 	GetUserInfo(user string) (*slack.User, error)
+	GetBotInfoContext(ctx context.Context, parameters slack.GetBotInfoParameters) (*slack.Bot, error)
 	GetEmoji() (map[string]string, error)
 	PostMessage(channelID string, options ...slack.MsgOption) (string, string, error)
 	UpdateMessage(channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
@@ -513,6 +514,17 @@ func (c *Client) GetUserProfile(userID string) (*slack.User, error) {
 		return nil, fmt.Errorf("getting user info: %w", err)
 	}
 	return user, nil
+}
+
+// GetBotInfo fetches a bot's name and icon by bot ID (the `bot_id` on a
+// bot_message). Used to resolve the display name and avatar for messages
+// posted by bots/apps, which carry no `user` field.
+func (c *Client) GetBotInfo(ctx context.Context, botID string) (*slack.Bot, error) {
+	bot, err := c.api.GetBotInfoContext(ctx, slack.GetBotInfoParameters{Bot: botID})
+	if err != nil {
+		return nil, fmt.Errorf("getting bot info: %w", err)
+	}
+	return bot, nil
 }
 
 // GetHistory retrieves message history for a channel.
