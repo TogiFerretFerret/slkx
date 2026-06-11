@@ -226,6 +226,16 @@ func reduceMouseClick(a *App, m tea.MouseClickMsg) tea.Cmd {
 		return nil
 
 	case x < a.layout.MsgEnd():
+		// Interim Phase 2 guard: per-window mouse routing lands in
+		// Phase 4 (window-management design §6). With splits active,
+		// PanelAt still maps the entire messages region to the single
+		// live pane, so a click on a placeholder window would start a
+		// drag selection in the live channel at bogus coordinates.
+		// Swallow clicks (and therefore drags — they can only begin
+		// here); mouse-wheel scrolling of the live pane stays enabled.
+		if a.wins.Len() > 1 {
+			return nil
+		}
 		a.focusedPanel = PanelMessages
 		// In the threads-list view, the messages-pane region
 		// renders threadsView, not the channel messages. Route

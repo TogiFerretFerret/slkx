@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/gammons/slk/internal/ui/help"
+	"github.com/gammons/slk/internal/ui/wintree"
 )
 
 // TestReduceMouseWheel_ScrollsActiveModal verifies that when a modal
@@ -60,5 +61,30 @@ func TestReduceMouseWheel_NoModalLeavesModalUntouched(t *testing.T) {
 	reduceMouseWheel(app, tea.MouseWheelMsg{Button: tea.MouseWheelDown, X: 5})
 	if got := app.help.Selected(); got != 0 {
 		t.Fatalf("normal mode: help selection should stay 0, got %d", got)
+	}
+}
+
+// TestReduceMouseClick_IgnoredInMessagesRegionWhenSplit pins the
+// interim Phase 2 guard: with multiple windows, PanelAt still maps
+// the whole messages region to the single live pane, so a click on a
+// placeholder window would begin a drag selection in the live channel
+// at bogus coordinates. Clicks (and therefore drags, which can only
+// start from the click branch) must be swallowed until per-window
+// mouse routing lands in Phase 4.
+func TestReduceMouseClick_IgnoredInMessagesRegionWhenSplit(t *testing.T) {
+	a := newTestAppWithMessages(t)
+	a.width = 200 // wide enough for two ≥42-col windows (wintree.MinWidth)
+	if cmd := a.splitWindow(wintree.SplitSideBySide); cmd != nil {
+		t.Fatal("split refused at width 200")
+	}
+	_ = a.View() // recompute layout bands for the split layout
+
+	pressX := a.layout.sidebarEnd + 2
+	pressY := 4
+	_, _ = a.Update(tea.MouseClickMsg{X: pressX, Y: pressY, Button: tea.MouseLeft})
+	_, _ = a.Update(tea.MouseMotionMsg{X: pressX + 10, Y: pressY + 1, Button: tea.MouseLeft})
+	_, _ = a.Update(tea.MouseReleaseMsg{X: pressX + 10, Y: pressY + 1, Button: tea.MouseLeft})
+	if a.messagepane.HasSelection() {
+		t.Fatal("split mode: click+drag in the messages region must not start a selection")
 	}
 }

@@ -34,20 +34,52 @@ func (a *App) renderWindowsRegion(frame panelLayoutFrame, themeVer int64, previe
 }
 
 // renderWindowNode renders one layout-tree node to a string of
-// exactly Rect.W x Rect.H cells.
+// exactly Rect.W x Rect.H cells. Callers guarantee Rect.W >= 1 and
+// Rect.H >= 1 (zero-extent children are skipped below). exactSize
+// enforces a minimum width and exact height at every leaf; widths
+// can only exceed a rect on the sub-minimum focused leaf, which
+// hard-truncates back via MaxWidth. Sub-minimum windows thus degrade
+// to garbled-but-correctly-sized cells instead of corrupting the
+// region geometry.
 func (a *App) renderWindowNode(n wintree.LayoutNode, frame panelLayoutFrame, themeVer int64) string {
 	if n.Leaf {
 		if n.ID == a.focusedWin {
 			sub := frame
 			sub.MsgWidth = n.Rect.W - 2
+			// Floor: a hard shrink can leave rects narrower than the
+			// panel chrome (W-2 < 2). Below 2, renderMessagesTop's
+			// borderedTopPane computes strings.Repeat(top, MsgWidth-2)
+			// with a negative count and panics (mirrors the
+			// msgContentHeight < 3 clamp downstream). The over-wide
+			// result is wrapped back to Rect.W by exactSize.
+			if sub.MsgWidth < 2 {
+				sub.MsgWidth = 2
+			}
 			sub.MsgBorder = 2
 			sub.ContentHeight = n.Rect.H
-			return exactSize(a.renderMessagesRegion(sub, themeVer, false), n.Rect.W, n.Rect.H)
+			out := exactSize(a.renderMessagesRegion(sub, themeVer, false), n.Rect.W, n.Rect.H)
+			if sub.MsgWidth+sub.MsgBorder > n.Rect.W {
+				// The floored frame renders wider than the rect
+				// (exactSize pads to a minimum width but never
+				// shrinks). Hard-truncate each row back, ANSI-aware,
+				// so the column tiling stays exact.
+				out = lipgloss.NewStyle().MaxWidth(n.Rect.W).Render(out)
+			}
+			return out
 		}
 		return a.renderPlaceholderWindow(n)
 	}
 	parts := make([]string, 0, len(n.Children))
 	for _, c := range n.Children {
+		// Zero-extent rects (more windows than rows/cols after a hard
+		// shrink) contribute zero cells and are skipped: exactSize
+		// treats a 0 dimension as "unset" and would render at natural
+		// size, breaking the region dimension contract. childRects
+		// extents sum exactly to the parent extent along the split
+		// axis, so the remaining children still tile the parent.
+		if c.Rect.W < 1 || c.Rect.H < 1 {
+			continue
+		}
 		parts = append(parts, a.renderWindowNode(c, frame, themeVer))
 	}
 	if n.Dir == wintree.SplitSideBySide {
@@ -66,10 +98,18 @@ func (a *App) renderPlaceholderWindow(n wintree.LayoutNode) string {
 	} else {
 		name = "# " + name
 	}
+	innerW, innerH := n.Rect.W-2, n.Rect.H-2
+	if innerW < 1 || innerH < 1 {
+		// Too small for border + label: a blank block of exactly
+		// Rect.W x Rect.H keeps the tiling intact (caller guarantees
+		// both >= 1; negative inner dims would otherwise flow into
+		// lipgloss.Place / Style.Width).
+		return exactSize("", n.Rect.W, n.Rect.H)
+	}
 	label := lipgloss.NewStyle().Foreground(styles.TextMuted).Render(name)
-	inner := lipgloss.Place(n.Rect.W-2, n.Rect.H-2, lipgloss.Center, lipgloss.Center, label)
+	inner := lipgloss.Place(innerW, innerH, lipgloss.Center, lipgloss.Center, label)
 	return exactSize(
-		styles.UnfocusedBorder.Width(n.Rect.W-2).Render(inner),
+		styles.UnfocusedBorder.Width(innerW).Render(inner),
 		n.Rect.W, n.Rect.H,
 	)
 }
