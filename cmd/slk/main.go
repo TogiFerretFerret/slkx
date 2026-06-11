@@ -385,9 +385,11 @@ func (r *userResolver) RequestBot(botID, username string) {
 	}()
 }
 
-// bestBotIcon returns the largest reasonable bot icon URL. The avatar
-// fetcher downscales to the avatar cell grid, so a larger source renders
-// sharper; fall back through the available sizes.
+// bestBotIcon returns the best bot icon URL for the avatar grid. The
+// avatar fetcher downscales to the avatar cell size, so we prefer the
+// 72px icon — large enough to render sharp yet almost always present —
+// then fall back through the other sizes by availability rather than
+// strictly by pixel size.
 func bestBotIcon(ic slack.Icons) string {
 	for _, u := range []string{ic.Image72, ic.Image48, ic.Image132, ic.Image36, ic.Image230} {
 		if u != "" {
@@ -3047,6 +3049,10 @@ func (h *rtmEventHandler) OnMessage(channelID, userID, ts, text, threadTS, subty
 			IsDND:           h.wsCtx != nil && h.wsCtx.DNDEnabled && (h.wsCtx.DNDEndTS.IsZero() || time.Now().Before(h.wsCtx.DNDEndTS)),
 		}
 		chType := h.channelTypes[channelID]
+		// Pass the raw userID (not authorID): ShouldNotify's self-message
+		// suppression keys on the human sender, and a bot message
+		// (userID == "", authorID == botID) can never be "you" — so the
+		// empty userID is intentional, not a bug to "fix" later.
 		if notify.ShouldNotify(ctx, channelID, userID, text, chType) {
 			senderName := authorID
 			if resolved, ok := h.userNames[authorID]; ok {
