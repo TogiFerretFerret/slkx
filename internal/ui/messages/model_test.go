@@ -1430,3 +1430,23 @@ func TestAppendRemoveUserIDDoNotMutateInput(t *testing.T) {
 		t.Fatalf("AppendUserID mutated input: %v", base)
 	}
 }
+
+func TestSetSearchTerms_ClonesInput(t *testing.T) {
+	m := New(nil, "general")
+	terms := []string{"deploy"}
+	m.SetSearchTerms(terms)
+	terms[0] = "mutated"
+	if len(m.searchTerms) != 1 || m.searchTerms[0] != "deploy" {
+		t.Fatalf("SetSearchTerms aliased caller slice: %v", m.searchTerms)
+	}
+}
+
+func TestSetSearchTerms_RedundantCallKeepsCache(t *testing.T) {
+	m := New(nil, "general")
+	m.SetSearchTerms([]string{"deploy"})
+	m.cache = []viewEntry{{}} // sentinel: a populated render cache
+	m.SetSearchTerms([]string{"deploy"})
+	if m.cache == nil {
+		t.Fatal("redundant SetSearchTerms invalidated the render cache")
+	}
+}

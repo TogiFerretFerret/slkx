@@ -3,6 +3,9 @@ package messages
 import (
 	"strings"
 	"testing"
+
+	"github.com/gammons/slk/internal/config"
+	"github.com/gammons/slk/internal/ui/styles"
 )
 
 func TestHighlightSearchTerms_PlainText(t *testing.T) {
@@ -56,5 +59,104 @@ func TestHighlightSearchTerms_MultipleTermsAndOccurrences(t *testing.T) {
 	got := HighlightSearchTerms("foo bar foo", []string{"foo", "bar"}, "[", "]")
 	if got != "[foo] [bar] [foo]" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestHighlightSearchTerms_OSC8HyperlinkBEL(t *testing.T) {
+	// OSC 8 hyperlink with BEL terminators: the label is highlighted,
+	// the URL bytes inside the OSC are never touched.
+	in := "\x1b]8;;https://x\x07deploy\x1b]8;;\x07 fine"
+	got := HighlightSearchTerms(in, []string{"deploy"}, "[", "]")
+	want := "\x1b]8;;https://x\x07[deploy]\x1b]8;;\x07 fine"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestHighlightSearchTerms_OSC8HyperlinkST_URLNotHighlighted(t *testing.T) {
+	// ST (\x1b\\) terminators, as emitted by osc8Hyperlink. The URL
+	// contains the search term; corrupting it would break the hyperlink,
+	// so it must pass through byte-identical.
+	in := "\x1b]8;;https://deploy.example\x1b\\deploy\x1b]8;;\x1b\\"
+	got := HighlightSearchTerms(in, []string{"deploy"}, "[", "]")
+	want := "\x1b]8;;https://deploy.example\x1b\\[deploy]\x1b]8;;\x1b\\"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestHighlightSearchTerms_OSCPreservesWordBoundaryState(t *testing.T) {
+	// An OSC sequence between letters must not create a false word
+	// start: "ploy" after the OSC is still mid-word ("de…ploy").
+	in := "de\x1b]8;;x\x07ploy"
+	got := HighlightSearchTerms(in, []string{"ploy"}, "[", "]")
+	if got != in {
+		t.Errorf("mid-word match highlighted across OSC: %q", got)
+	}
+}
+
+func TestHighlightSearchTerms_BareTrailingEscape(t *testing.T) {
+	got := HighlightSearchTerms("deploy\x1b", []string{"deploy"}, "[", "]")
+	want := "[deploy]\x1b"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestHighlightSearchTerms_UnterminatedOSC(t *testing.T) {
+	// Unterminated OSC consumes the rest of the string as one opaque
+	// ANSI segment.
+	in := "deploy \x1b]8;;https://x"
+	got := HighlightSearchTerms(in, []string{"deploy"}, "[", "]")
+	want := "[deploy] \x1b]8;;https://x"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestHighlightSearchTerms_NonCSIEscape(t *testing.T) {
+	// \x1b(B (charset designation): ESC plus the next byte are consumed
+	// as an opaque 2-byte segment; the byte after that is visible text.
+	in := "fine \x1b(B deploy"
+	got := HighlightSearchTerms(in, []string{"deploy"}, "[", "]")
+	want := "fine \x1b(B [deploy]"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestSearchHighlightSGR_EndRestoresThemeColors(t *testing.T) {
+	styles.Apply("dark", config.Theme{})
+	t.Cleanup(func() { styles.Apply("dark", config.Theme{}) })
+	start, end, ok := searchHighlightSGR()
+	if !ok {
+		t.Fatal("searchHighlightSGR returned !ok")
+	}
+	if start == "" {
+		t.Fatal("empty start sequence")
+	}
+	bg, fg := BgANSI(), FgANSI()
+	if bg == "" || fg == "" {
+		t.Fatalf("theme ANSI helpers empty: bg=%q fg=%q", bg, fg)
+	}
+	bi := strings.Index(end, bg)
+	fi := strings.Index(end, fg)
+	if bi < 0 || fi < 0 {
+		t.Fatalf("end %q does not restore theme bg/fg (bg=%q fg=%q)", end, bg, fg)
+	}
+	if fi < bi {
+		t.Errorf("fg restored before bg in %q", end)
+	}
+	if bi == 0 {
+		t.Errorf("no close/reset sequence before bg restore in %q", end)
+	}
+}
+
+func BenchmarkHighlightSearchTerms_ASCII(b *testing.B) {
+	line := strings.Repeat("the quick brown fox jumps over the lazy dog ", 4)
+	terms := []string{"deploy"}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		HighlightSearchTerms(line, terms, "\x1b[7m", "\x1b[27m")
 	}
 }

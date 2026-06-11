@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -631,7 +632,12 @@ func channelGlyph(chType string) string {
 // word-prefix occurrences get highlighted in message text. Invalidates
 // the render cache.
 func (m *Model) SetSearchTerms(terms []string) {
-	m.searchTerms = terms
+	// Redundant calls (same terms) must not thrash the render cache;
+	// clone so a caller mutating its slice can't alias our state.
+	if slices.Equal(terms, m.searchTerms) {
+		return
+	}
+	m.searchTerms = slices.Clone(terms)
 	m.InvalidateCache()
 	m.dirty()
 }
@@ -1860,13 +1866,12 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 	}
 	rendered := RenderSlackMarkdownWith(MessageTextSource(msg), bodyOpts)
 	if len(m.searchTerms) > 0 {
-		// Derive the style's raw open/close SGR sequences by rendering
-		// a sentinel and splitting on it — works for any lipgloss color
-		// profile without hand-building escape codes. One split per
-		// renderMessagePlain call (i.e. per cache miss), not per line.
-		parts := strings.SplitN(styles.SearchHighlightStyle().Render("\x00"), "\x00", 2)
-		if len(parts) == 2 && parts[0] != "" {
-			rendered = HighlightSearchTerms(rendered, m.searchTerms, parts[0], parts[1])
+		// searchHighlightSGR's close sequence restores the theme bg/fg
+		// after the highlight's reset so plain body text doesn't bleed
+		// terminal-default colors. One derivation per renderMessagePlain
+		// call (i.e. per cache miss), not per line.
+		if hlStart, hlEnd, ok := searchHighlightSGR(); ok {
+			rendered = HighlightSearchTerms(rendered, m.searchTerms, hlStart, hlEnd)
 		}
 	}
 	text := styles.MessageText.Render(WordWrap(rendered, contentWidth))
