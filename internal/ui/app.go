@@ -2422,7 +2422,7 @@ func (a *App) View() tea.View {
 	if a.sidebarVisible {
 		panels = append(panels, a.renderSidebar(frame.SidebarWidth, frame.SidebarBorder, frame.ContentHeight, themeVer))
 	}
-	if s := a.renderMessagesRegion(frame, themeVer, previewActive); s != "" {
+	if s := a.renderWindowsRegion(frame, themeVer, previewActive); s != "" {
 		panels = append(panels, s)
 	}
 	if a.threadVisible && frame.ThreadWidth > 0 && !previewActive {
