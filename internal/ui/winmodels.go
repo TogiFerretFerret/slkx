@@ -37,14 +37,18 @@ func (a *App) newWindowModel(chName string) *messages.Model {
 // modelsForChannel returns the models of every window viewing chID,
 // in tree order. Used by channel-scoped event fan-out (Task 2).
 //
-// The FOCUSED window's channel is a.activeChannelID, not its tree
-// record. activeChannelID is the App-level invariant every pre-Phase-3
-// gate used ("does this event belong to the pane in view?"), and it is
-// what retargetActiveChannel / reduceChannelSelected keep authoritative
-// for the window in focus; the tree record is a label that can lag it
-// (see setFocusedWindowChannel's apply-time note) and that legacy
-// entry points like SetInitialChannel never write at all. Unfocused
-// windows have no App-level context, so their tree records route them.
+// The FOCUSED window routes by a.activeChannelID, not its tree
+// record, for two reasons. (a) Bug-compatibility with the legacy
+// gates: every pre-Phase-3 seam asked `m.ChannelID ==
+// a.activeChannelID` — e.g. during a workspace switch,
+// resetWindowTree leaves the focused window's record empty while
+// activeChannelID still names the outgoing channel until the queued
+// ChannelSelectedMsg lands, and routing by activeChannelID reproduces
+// the legacy behavior exactly in that interval (self-correcting once
+// the selection applies). (b) activeChannelID is the established
+// contract for "the focused pane's channel" that the legacy seams and
+// ~95 existing tests encode. Unfocused windows have no App-level
+// context, so their tree records route them.
 func (a *App) modelsForChannel(chID string) []*messages.Model {
 	if chID == "" {
 		return nil
@@ -66,15 +70,26 @@ func (a *App) modelsForChannel(chID string) []*messages.Model {
 	return out
 }
 
+// cloneMessageItem returns a copy of item safe to hand to one model
+// when the same value fans out to several: the struct copies by
+// value, but the Reactions slice needs its own backing array —
+// UpdateReaction writes elements in place and shifts on remove, so a
+// shared array would let one window's reaction event corrupt another
+// window's view. ReactionItem.UserIDs needs no copy: Append /
+// RemoveUserID are copy-on-write. Attachments / Blocks /
+// LegacyAttachments are never mutated in place by the model.
+func cloneMessageItem(item messages.MessageItem) messages.MessageItem {
+	if len(item.Reactions) > 0 {
+		item.Reactions = append([]messages.ReactionItem(nil), item.Reactions...)
+	}
+	return item
+}
+
 // cloneMessageItems deep-copies a message slice for handing to a
 // model: a fresh top-level slice (covers in-place item writes:
 // SwapLocalSent, UpsertSelfSent, PatchUserName, UpdateMessageInPlace,
-// IncrementReplyCount, RemoveMessageByTS) AND a fresh Reactions slice
-// per item — UpdateReaction writes elements in place and shifts on
-// remove, so a shared backing array would let one window's reaction
-// event corrupt another window's view. ReactionItem.UserIDs needs no
-// copy: Append/RemoveUserID are copy-on-write. Attachments / Blocks /
-// LegacyAttachments are never mutated in place by the model.
+// IncrementReplyCount, RemoveMessageByTS) plus a per-item
+// cloneMessageItem.
 //
 // Preserves nil-ness: nil in, nil out (the nil-vs-empty distinction
 // matters to MessagesLoadedMsg's network-failure contract).
@@ -83,11 +98,8 @@ func cloneMessageItems(items []messages.MessageItem) []messages.MessageItem {
 		return nil
 	}
 	out := make([]messages.MessageItem, len(items))
-	copy(out, items)
-	for i := range out {
-		if len(out[i].Reactions) > 0 {
-			out[i].Reactions = append([]messages.ReactionItem(nil), out[i].Reactions...)
-		}
+	for i := range items {
+		out[i] = cloneMessageItem(items[i])
 	}
 	return out
 }

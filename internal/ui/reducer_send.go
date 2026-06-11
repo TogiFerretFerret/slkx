@@ -84,8 +84,13 @@ var reduceSend reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 		}
 		a.selfSend.RecordSent(m.Message.TS)
 		for _, mm := range a.modelsForChannel(m.ChannelID) {
-			if !mm.SwapLocalSent(m.LocalTS, m.Message) {
-				mm.UpsertSelfSent(m.Message)
+			// Per-model clone: fresh post responses carry no
+			// reactions today, but a shared Reactions array across
+			// sibling models would corrupt on the first in-place
+			// UpdateReaction — clone is the cheap insurance.
+			item := cloneMessageItem(m.Message)
+			if !mm.SwapLocalSent(m.LocalTS, item) {
+				mm.UpsertSelfSent(item)
 			}
 		}
 		return nil, true
@@ -257,9 +262,13 @@ func reduceNewMessage(a *App, m NewMessageMsg) tea.Cmd {
 	for _, mm := range a.modelsForChannel(m.ChannelID) {
 		// Always add to the pane if it's a top-level message (no
 		// ThreadTS or is the parent); update the parent's reply
-		// count when a thread reply arrives.
+		// count when a thread reply arrives. cloneMessageItem: fresh
+		// WS messages carry no reactions today, but a shared
+		// Reactions array across sibling models would corrupt on the
+		// first in-place UpdateReaction — clone is the cheap
+		// insurance.
 		if m.Message.ThreadTS == "" || m.Message.ThreadTS == m.Message.TS {
-			mm.AppendMessage(m.Message)
+			mm.AppendMessage(cloneMessageItem(m.Message))
 		} else {
 			mm.IncrementReplyCount(m.Message.ThreadTS, m.Message.TS)
 		}

@@ -954,6 +954,28 @@ func (m *Model) PrependMessages(msgs []MessageItem) {
 	if len(msgs) == 0 {
 		return
 	}
+	// Boundary guard: a backfill that raced a channel re-select (the
+	// re-select replaced the buffer while the backfill was in flight)
+	// can deliver items the buffer already contains. Keep only items
+	// strictly older than the current head. TS comparison is
+	// lexicographic, matching the rest of the model (e.g. buildCache's
+	// lastReadTS compare): real Slack TSes are fixed-width
+	// "seconds.micros" strings. A "local:" optimistic placeholder at
+	// the head compares greater than any numeric TS, so the guard
+	// degrades to keep-everything there — never a wrong drop.
+	if len(m.messages) > 0 {
+		head := m.messages[0].TS
+		kept := make([]MessageItem, 0, len(msgs))
+		for _, item := range msgs {
+			if item.TS < head {
+				kept = append(kept, item)
+			}
+		}
+		if len(kept) == 0 {
+			return
+		}
+		msgs = kept
+	}
 	count := len(msgs)
 	if debuglog.Enabled() {
 		debuglog.Cache("messages.Model.PrependMessages: channel=%q count_before=%d count_added=%d added=[%s]",

@@ -8,6 +8,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -79,12 +80,19 @@ func TestFanout_NewMessageDoesNotReachOtherChannelWindow(t *testing.T) {
 	}
 }
 
-func TestFanout_SameChannelTwiceBothUpdate(t *testing.T) {
+// sameChannelApp returns an app with two windows both viewing C1
+// (window 2 focused — split clones the source channel).
+func sameChannelApp(t *testing.T) (*App, wintree.LeafID, wintree.LeafID) {
+	t.Helper()
 	a := newWideTestApp(t)
 	_, _ = a.Update(ChannelSelectedMsg{ID: "C1", Name: "general", Type: "channel"})
 	w1 := a.focusedWin
 	_ = a.splitWindow(wintree.SplitSideBySide) // clone: both on C1
-	w2 := a.focusedWin
+	return a, w1, a.focusedWin
+}
+
+func TestFanout_SameChannelTwiceBothUpdate(t *testing.T) {
+	a, w1, w2 := sameChannelApp(t)
 	_, _ = a.Update(inboundMsg("C1"))
 	n1, n2 := len(a.winModels[w1].Messages()), len(a.winModels[w2].Messages())
 	if n1 != n2 || n1 == 0 {
@@ -153,5 +161,120 @@ func TestFanout_MarkReadOnlyOnFocusedSelection(t *testing.T) {
 	}
 	if got := a.winModels[w1].LastReadTS(); got != "5.0" {
 		t.Fatalf("unfocused window's lastReadTS must be unchanged: got %q, want %q", got, "5.0")
+	}
+}
+
+// localPlaceholderTS returns the optimistic "local:" placeholder TS at
+// the tail of m, failing the test if none is there.
+func localPlaceholderTS(t *testing.T, m *messages.Model) string {
+	t.Helper()
+	msgs := m.Messages()
+	if len(msgs) == 0 || !strings.HasPrefix(msgs[len(msgs)-1].TS, "local:") {
+		t.Fatalf("expected a local: placeholder at the tail, got %+v", msgs)
+	}
+	return msgs[len(msgs)-1].TS
+}
+
+func modelHasTS(m *messages.Model, ts string) bool {
+	for _, item := range m.Messages() {
+		if item.TS == ts {
+			return true
+		}
+	}
+	return false
+}
+
+// TestFanout_OptimisticSendSwapsInSiblingWindow pins the optimistic-
+// send lifecycle across same-channel siblings: SendMessageMsg renders
+// the placeholder in BOTH windows, and the MessageSentMsg swap
+// replaces it with the authoritative message in BOTH.
+func TestFanout_OptimisticSendSwapsInSiblingWindow(t *testing.T) {
+	a, w1, w2 := sameChannelApp(t)
+	_, _ = a.Update(SendMessageMsg{ChannelID: "C1", Text: "hello"})
+	ts1 := localPlaceholderTS(t, a.winModels[w1])
+	ts2 := localPlaceholderTS(t, a.winModels[w2])
+	if ts1 != ts2 {
+		t.Fatalf("siblings must share the placeholder localTS: %q vs %q", ts1, ts2)
+	}
+	_, _ = a.Update(MessageSentMsg{ChannelID: "C1", LocalTS: ts1, Message: messages.MessageItem{
+		TS: "100.0", UserID: "ME", UserName: "me", Text: "hello", Timestamp: "1:00 PM",
+	}})
+	for _, w := range []wintree.LeafID{w1, w2} {
+		if modelHasTS(a.winModels[w], ts1) {
+			t.Fatalf("window %v still shows the placeholder after the swap", w)
+		}
+		if !modelHasTS(a.winModels[w], "100.0") {
+			t.Fatalf("window %v missing the authoritative message after the swap", w)
+		}
+	}
+}
+
+// TestFanout_FailedSendRollsBackInSiblingWindow: MessageSendFailedMsg
+// removes the optimistic placeholder from BOTH same-channel windows.
+func TestFanout_FailedSendRollsBackInSiblingWindow(t *testing.T) {
+	a, w1, w2 := sameChannelApp(t)
+	_, _ = a.Update(SendMessageMsg{ChannelID: "C1", Text: "hello"})
+	ts := localPlaceholderTS(t, a.winModels[w1])
+	_, _ = a.Update(MessageSendFailedMsg{ChannelID: "C1", LocalTS: ts, Reason: "boom"})
+	for _, w := range []wintree.LeafID{w1, w2} {
+		if modelHasTS(a.winModels[w], ts) {
+			t.Fatalf("window %v still shows the placeholder after rollback", w)
+		}
+	}
+}
+
+// TestFanout_OlderMessagesPrependIntoSiblingWindow: an older-history
+// backfill for C1 prepends into BOTH windows viewing C1.
+func TestFanout_OlderMessagesPrependIntoSiblingWindow(t *testing.T) {
+	a, w1, w2 := sameChannelApp(t)
+	// Baseline newer than the backfill items so the model's overlap
+	// guard (PrependMessages) keeps them.
+	_, _ = a.Update(MessagesLoadedMsg{ChannelID: "C1", Messages: []messages.MessageItem{
+		{TS: "5.0", UserID: "U1", UserName: "alice", Text: "baseline", Timestamp: "1:00 PM"},
+	}})
+	_, _ = a.Update(OlderMessagesLoadedMsg{ChannelID: "C1", Messages: testMessageItems(2)})
+	for _, w := range []wintree.LeafID{w1, w2} {
+		msgs := a.winModels[w].Messages()
+		if len(msgs) != 3 {
+			t.Fatalf("window %v: want 3 messages after backfill, got %d", w, len(msgs))
+		}
+		if msgs[0].TS != "1.0" {
+			t.Fatalf("window %v: backfill items must be at the head, got %q", w, msgs[0].TS)
+		}
+	}
+}
+
+// TestFetchingOlder_PerChannelIsolation: an in-flight C1 backfill must
+// not block a C2 backfill (per-channel flags), and a C1 completion
+// clears C1's flag even when no window views C1 anymore.
+func TestFetchingOlder_PerChannelIsolation(t *testing.T) {
+	a := newWideTestApp(t)
+	_, _ = a.Update(ChannelSelectedMsg{ID: "C2", Name: "ops", Type: "channel"})
+	a.messagepane.SetMessages(testMessageItems(2))
+	called := false
+	a.setOlderMessagesFetcherForTest(func(channelID ids.ChannelID, oldestTS ids.MessageTS) tea.Msg {
+		if channelID != "C2" {
+			t.Errorf("fetcher called for %q, want C2", channelID)
+		}
+		called = true
+		return nil
+	})
+	a.fetchingOlder["C1"] = true // in-flight backfill on another channel
+	cmd := a.maybeFetchOlderHistory(true)
+	if cmd == nil {
+		t.Fatal("C1's in-flight backfill must not block C2's")
+	}
+	_ = drainBatch(cmd)
+	if !called {
+		t.Fatal("expected the C2 fetcher to be dispatched")
+	}
+	if !a.fetchingOlder["C2"] {
+		t.Fatal("expected fetchingOlder[C2]=true after dispatch")
+	}
+	// Completion for C1 clears its own flag even though no window
+	// views C1 (the old global bool stayed stuck here).
+	_, _ = a.Update(OlderMessagesLoadedMsg{ChannelID: "C1"})
+	if a.fetchingOlder["C1"] {
+		t.Fatal("OlderMessagesLoaded for C1 must clear C1's flag even with no viewing window")
 	}
 }
