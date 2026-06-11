@@ -30,6 +30,7 @@ import (
 	slackclient "github.com/gammons/slk/internal/slack"
 	"github.com/gammons/slk/internal/slack/membership"
 	"github.com/gammons/slk/internal/slackhttp"
+	"github.com/gammons/slk/internal/slackurl"
 	"github.com/gammons/slk/internal/text"
 	"github.com/gammons/slk/internal/ui"
 	"github.com/gammons/slk/internal/ui/channelfinder"
@@ -39,6 +40,7 @@ import (
 	"github.com/gammons/slk/internal/ui/messages/blockkit"
 	"github.com/gammons/slk/internal/ui/presencemenu"
 	"github.com/gammons/slk/internal/ui/reactionpicker"
+	"github.com/gammons/slk/internal/ui/searchresults"
 	"github.com/gammons/slk/internal/ui/sidebar"
 	"github.com/gammons/slk/internal/ui/statusbar"
 	"github.com/gammons/slk/internal/ui/styles"
@@ -1105,7 +1107,33 @@ func run() error {
 					Err:       err,
 				}
 			},
-			// SearchWorkspace wired in Task 10.
+			SearchWorkspace: func(query string) tea.Msg {
+				wctx := router.Active()
+				if wctx == nil {
+					return nil
+				}
+				res, err := wctx.Client.SearchMessages(context.Background(), query, 50)
+				if err != nil {
+					return ui.WorkspaceSearchResultsMsg{Query: query, Err: err}
+				}
+				items := make([]searchresults.Item, 0, len(res.Matches))
+				for _, match := range res.Matches {
+					threadTS := ""
+					if pl, ok := slackurl.Parse(match.Permalink); ok {
+						threadTS = string(pl.ThreadTS)
+					}
+					items = append(items, searchresults.Item{
+						ChannelID:   match.Channel.ID,
+						ChannelName: match.Channel.Name,
+						UserName:    match.Username,
+						TS:          match.Timestamp,
+						ThreadTS:    threadTS,
+						Text:        match.Text,
+						Timestamp:   formatTimestamp(match.Timestamp, tsFormat),
+					})
+				}
+				return ui.WorkspaceSearchResultsMsg{Query: query, Items: items, Total: res.Total}
+			},
 		}))
 
 		app.SetMessageService(ui.NewMessageService(ui.MessageServiceFuncs{

@@ -5,7 +5,9 @@
 // status-line `/query  i/N` segment.
 //
 // Message family:
-//   ChannelSearchResultsMsg - FTS match list for the active channel
+//   ChannelSearchResultsMsg   - FTS match list for the active channel
+//   WorkspaceSearchResultsMsg - server-side search.messages results
+//                               for the ctrl+f modal
 //
 // Stale results (the user switched channels while the query ran) are
 // dropped. An error clears search state and toasts; an empty result
@@ -36,28 +38,45 @@ type activeSearch struct {
 }
 
 var reduceSearch reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
-	m, ok := msg.(ChannelSearchResultsMsg)
-	if !ok {
-		return nil, false
+	switch m := msg.(type) {
+	case ChannelSearchResultsMsg:
+		return reduceChannelSearchResults(a, m), true
+	case WorkspaceSearchResultsMsg:
+		if !a.searchResults.IsVisible() || a.searchResults.Query() != m.Query {
+			return nil, true // stale: modal closed or query changed
+		}
+		if m.Err != nil {
+			a.searchResults.SetError("Search failed: " + m.Err.Error())
+			return nil, true
+		}
+		a.searchResults.SetResults(m.Items, m.Total)
+		return nil, true
 	}
+	return nil, false
+}
+
+// reduceChannelSearchResults applies an in-channel `/` FTS result:
+// stale/superseded drop, error toast, no-match status, or install the
+// match list and jump to the nearest match.
+func reduceChannelSearchResults(a *App, m ChannelSearchResultsMsg) tea.Cmd {
 	if m.ChannelID != a.activeChannelID {
-		return nil, true // stale: channel changed since query
+		return nil // stale: channel changed since query
 	}
 	if m.Gen != a.searchGen {
 		// Superseded: the user cleared the search or dispatched a
 		// newer query while this one was in flight.
-		return nil, true
+		return nil
 	}
 	if m.Err != nil {
 		debuglog.General("ChannelSearchResultsMsg: channel=%s query=%q err=%v",
 			m.ChannelID, m.Query, m.Err)
 		a.clearActiveSearch()
-		return func() tea.Msg { return ToastMsg{Text: "Search failed"} }, true
+		return func() tea.Msg { return ToastMsg{Text: "Search failed"} }
 	}
 	if len(m.TSes) == 0 {
 		a.clearActiveSearch()
 		a.statusbar.SetSearch(fmt.Sprintf("/%s  no matches", m.Query))
-		return nil, true
+		return nil
 	}
 
 	a.search = &activeSearch{query: m.Query, terms: m.Terms, matches: m.TSes}
@@ -76,7 +95,7 @@ var reduceSearch reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
 			break
 		}
 	}
-	return a.jumpToCurrentMatch(), true
+	return a.jumpToCurrentMatch()
 }
 
 // jumpToCurrentMatch selects the match at a.search.idx, fetching a

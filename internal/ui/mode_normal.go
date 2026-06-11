@@ -56,7 +56,10 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, a.keys.Escape):
 		// An active `/` search absorbs the first Esc: clear it and
-		// stop, leaving thread panels / edits untouched.
+		// stop, leaving thread panels / edits untouched. v1
+		// limitation: Esc during the in-flight window doesn't cancel
+		// a local channel search; acceptable because local FTS is
+		// ms-fast — workspace search cancels via modal close instead.
 		if a.search != nil {
 			a.clearActiveSearch()
 			return nil
@@ -86,6 +89,11 @@ func handleNormalMode(a *App, msg tea.KeyMsg) tea.Cmd {
 
 	case key.Matches(msg, a.keys.SearchPrev) && a.search != nil && a.focusedPanel != PanelThread:
 		return a.searchStep(-1)
+
+	case key.Matches(msg, a.keys.WorkspaceSearch):
+		a.searchResults.Open()
+		a.SetMode(ModeWorkspaceSearch)
+		return nil
 
 	case key.Matches(msg, a.keys.Tab):
 		a.FocusNext()

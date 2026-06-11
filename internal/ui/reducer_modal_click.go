@@ -58,6 +58,8 @@ func (a *App) activeModalClickTarget() (modalClickTarget, bool) {
 	switch a.mode {
 	case ModeChannelFinder:
 		return modalClickTarget{&a.channelFinder, &a.channelFinder, enter}, true
+	case ModeWorkspaceSearch:
+		return modalClickTarget{&a.searchResults, &a.searchResults, enter}, true
 	case ModeWorkspaceFinder:
 		return modalClickTarget{&a.workspaceFinder, &a.workspaceFinder, enter}, true
 	case ModeThemeSwitcher:

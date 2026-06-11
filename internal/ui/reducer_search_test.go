@@ -7,11 +7,13 @@
 package ui
 
 import (
+	"errors"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/searchresults"
 )
 
 func searchTestApp(t *testing.T) *App {
@@ -267,5 +269,105 @@ func TestSearchNextGatedOffThreadPanel(t *testing.T) {
 	app.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
 	if app.search == nil || app.search.idx != 0 {
 		t.Fatalf("n advanced search while thread focused: %+v", app.search)
+	}
+}
+
+func TestCtrlFOpensWorkspaceSearch(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if app.mode != ModeWorkspaceSearch || !app.searchResults.IsVisible() {
+		t.Fatalf("mode=%v visible=%v", app.mode, app.searchResults.IsVisible())
+	}
+}
+
+func TestWorkspaceSearchSubmitAndResults(t *testing.T) {
+	app := searchTestApp(t)
+	var gotQuery string
+	app.SetSearchService(NewSearchService(SearchServiceFuncs{
+		SearchWorkspace: func(query string) tea.Msg {
+			gotQuery = query
+			return WorkspaceSearchResultsMsg{Query: query, Items: []searchresults.Item{
+				{ChannelID: "C2", ChannelName: "ops", TS: "2.0", Text: "hit"},
+			}, Total: 1}
+		},
+	}))
+	app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	app.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	for _, m := range drainCmd(cmd) {
+		app.Update(m)
+	}
+	if gotQuery != "q" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if sel, ok := app.searchResults.Selected(); !ok || sel.ChannelID != "C2" {
+		t.Fatalf("results not installed: %+v ok=%v", sel, ok)
+	}
+}
+
+func TestWorkspaceSearchSelectNavigates(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	app.searchResults.HandleKey("q")
+	app.searchResults.HandleKey("enter")
+	app.searchResults.SetResults([]searchresults.Item{
+		{ChannelID: "C2", ChannelName: "ops", TS: "2.0"},
+	}, 1)
+
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	msgs := drainCmd(cmd)
+	var selected *ChannelSelectedMsg
+	for _, m := range msgs {
+		if cs, ok := m.(ChannelSelectedMsg); ok {
+			selected = &cs
+		}
+	}
+	if selected == nil || selected.ID != "C2" {
+		t.Fatalf("no ChannelSelectedMsg dispatched: %v", msgs)
+	}
+	if app.pendingLinkNav == nil || app.pendingLinkNav.messageTS != "2.0" {
+		t.Fatalf("pending nav = %+v", app.pendingLinkNav)
+	}
+	if app.mode != ModeNormal || app.searchResults.IsVisible() {
+		t.Fatal("modal not closed")
+	}
+}
+
+func TestWorkspaceSearchErrorShownInModal(t *testing.T) {
+	app := searchTestApp(t)
+	app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	app.searchResults.HandleKey("q")
+	app.searchResults.HandleKey("enter")
+	app.Update(WorkspaceSearchResultsMsg{Query: "q", Err: errors.New("rate limited")})
+	if !app.searchResults.IsVisible() || app.searchResults.Query() != "q" {
+		t.Fatal("error must keep modal open with query intact")
+	}
+}
+
+func TestWorkspaceSearchEscWhilePendingDropsLateResult(t *testing.T) {
+	app := searchTestApp(t)
+	app.SetSearchService(NewSearchService(SearchServiceFuncs{
+		SearchWorkspace: func(query string) tea.Msg {
+			return WorkspaceSearchResultsMsg{Query: query, Items: []searchresults.Item{
+				{ChannelID: "C2", ChannelName: "ops", TS: "2.0", Text: "hit"},
+			}, Total: 1}
+		},
+	}))
+	app.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	app.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	_, cmd := app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// Esc closes the modal while the search is in flight.
+	app.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if app.mode != ModeNormal || app.searchResults.IsVisible() {
+		t.Fatal("Esc should close the modal")
+	}
+	for _, m := range drainCmd(cmd) {
+		app.Update(m)
+	}
+	if app.searchResults.IsVisible() {
+		t.Fatal("late result re-opened the closed modal")
+	}
+	if _, ok := app.searchResults.Selected(); ok {
+		t.Fatal("late result was installed after Esc")
 	}
 }

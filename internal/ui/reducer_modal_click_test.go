@@ -8,6 +8,7 @@ import (
 
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/help"
+	"github.com/gammons/slk/internal/ui/searchresults"
 )
 
 func openChannelFinder(t *testing.T) *App {
@@ -106,6 +107,48 @@ func TestModalClick_InsideNonRowIsNoop(t *testing.T) {
 	}
 	if app.mode != ModeChannelFinder {
 		t.Errorf("mode = %v, want ModeChannelFinder (unchanged)", app.mode)
+	}
+}
+
+// TestModalClick_WorkspaceSearchRowActivates verifies the ctrl+f search
+// modal is registered as a click target: clicking a result row selects
+// it and activates (Enter -> navigate), rather than falling through to
+// the dismiss-on-any-click default.
+func TestModalClick_WorkspaceSearchRowActivates(t *testing.T) {
+	app := NewApp()
+	app.width = 80
+	app.height = 24
+	app.activeChannelID = "C1"
+	app.searchResults.Open()
+	app.SetMode(ModeWorkspaceSearch)
+	app.searchResults.HandleKey("q")
+	app.searchResults.HandleKey("enter")
+	app.searchResults.SetResults([]searchresults.Item{
+		{ChannelID: "C2", ChannelName: "ops", TS: "2.0"},
+		{ChannelID: "C3", ChannelName: "dev", TS: "3.0"},
+	}, 2)
+
+	w, h := app.searchResults.BoxSize(app.width, app.height)
+	startX := (app.width - w) / 2
+	startY := (app.height - h) / 2
+
+	// Second result row: box-local y = listTopOffset(5) + 1.
+	cmd := reduceMouseClick(app, tea.MouseClickMsg{Button: tea.MouseLeft, X: startX + 3, Y: startY + 5 + 1})
+	if cmd == nil {
+		t.Fatal("clicking a result row should return an activation cmd")
+	}
+	var selected *ChannelSelectedMsg
+	for _, m := range drainCmd(cmd) {
+		if cs, ok := m.(ChannelSelectedMsg); ok {
+			selected = &cs
+		}
+	}
+	if selected == nil || selected.ID != "C3" {
+		t.Fatalf("clicked second row, got %+v", selected)
+	}
+	if app.searchResults.IsVisible() || app.mode != ModeNormal {
+		t.Errorf("modal should close after activation: visible=%v mode=%v",
+			app.searchResults.IsVisible(), app.mode)
 	}
 }
 

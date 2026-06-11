@@ -21,6 +21,7 @@ import (
 	emojiutil "github.com/gammons/slk/internal/emoji"
 	"github.com/gammons/slk/internal/ui/channelfinder"
 	"github.com/gammons/slk/internal/ui/messages"
+	"github.com/gammons/slk/internal/ui/searchresults"
 	"github.com/gammons/slk/internal/ui/sidebar"
 )
 
@@ -100,6 +101,15 @@ type (
 		TSes      []string
 		Gen       uint64
 		Err       error
+	}
+	// WorkspaceSearchResultsMsg delivers server-side search.messages
+	// results for the ctrl+f modal. Total is Slack's reported total match
+	// count (may exceed len(Items); v1 fetches the first page only).
+	WorkspaceSearchResultsMsg struct {
+		Query string
+		Items []searchresults.Item
+		Total int
+		Err   error
 	}
 	NewMessageMsg struct {
 		ChannelID string

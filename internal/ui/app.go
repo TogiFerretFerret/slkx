@@ -40,6 +40,7 @@ import (
 	"github.com/gammons/slk/internal/ui/presencemenu"
 	"github.com/gammons/slk/internal/ui/reactionpicker"
 	"github.com/gammons/slk/internal/ui/reactionsview"
+	"github.com/gammons/slk/internal/ui/searchresults"
 	"github.com/gammons/slk/internal/ui/sidebar"
 	"github.com/gammons/slk/internal/ui/statusbar"
 	"github.com/gammons/slk/internal/ui/styles"
@@ -91,6 +92,7 @@ type App struct {
 	compose          compose.Model
 	statusbar        statusbar.Model
 	channelFinder    channelfinder.Model
+	searchResults    searchresults.Model
 	newMessagePicker newmessagepicker.Model
 	workspaceFinder  workspacefinder.Model
 	themeSwitcher    themeswitcher.Model
@@ -394,6 +396,7 @@ func NewApp() *App {
 		compose:              compose.New(""),
 		statusbar:            statusbar.New(),
 		channelFinder:        channelfinder.New(),
+		searchResults:        searchresults.New(),
 		newMessagePicker:     newmessagepicker.New(),
 		workspaceFinder:      workspacefinder.New(),
 		themeSwitcher:        themeswitcher.New(),
