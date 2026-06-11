@@ -100,6 +100,26 @@ func TestChannelSelected_UpdatesFocusedWindowChannel(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSwitch_ResetsWindowTree(t *testing.T) {
+	a := newWideTestApp(t)
+	_, _ = a.Update(ChannelSelectedMsg{ID: "C1", Name: "general", Type: "channel"})
+	_ = a.splitWindow(wintree.SplitSideBySide)
+	if a.wins.Len() != 2 {
+		t.Fatalf("Len = %d, want 2", a.wins.Len())
+	}
+	// Simulate a workspace switch with the minimal msg the reducer
+	// accepts (nil Channels takes the empty-workspace branch; all
+	// other nil slices/maps are tolerated — see app_test.go's
+	// TestApp_WorkspaceSwitchResetsView).
+	_, _ = a.Update(WorkspaceSwitchedMsg{TeamID: "T2", TeamName: "Other", Channels: nil})
+	if a.wins.Len() != 1 {
+		t.Fatalf("Len = %d, want 1 (tree must reset on workspace switch)", a.wins.Len())
+	}
+	if ch, _ := a.wins.Channel(a.focusedWin); ch.ID != "" {
+		t.Fatalf("root window channel = %+v, want empty after reset", ch)
+	}
+}
+
 func TestCommands_SpVspQOnly(t *testing.T) {
 	a := newWideTestApp(t)
 	_ = executeCommand(a, "vsp")

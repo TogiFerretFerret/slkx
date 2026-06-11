@@ -61,6 +61,7 @@ import (
 
 	"github.com/gammons/slk/internal/ids"
 	"github.com/gammons/slk/internal/ui/styles"
+	"github.com/gammons/slk/internal/ui/wintree"
 )
 
 var reduceWorkspace reducerFunc = func(a *App, msg tea.Msg) (tea.Cmd, bool) {
@@ -251,6 +252,12 @@ func reduceWorkspaceSwitched(a *App, m WorkspaceSwitchedMsg) tea.Cmd {
 	a.lastOpenedThreadTS = ""
 	a.CloseThread()
 	a.clearSelections()
+	// Window tree is per-workspace state in Phase 2: collapse to a
+	// single empty window so no leaf carries a cross-workspace channel.
+	// The queued ChannelSelectedMsg for this workspace re-populates it.
+	wins, rootWin := wintree.New(wintree.Channel{})
+	a.wins = wins
+	a.focusedWin = rootWin
 	a.compose.Reset()
 	a.statusbar.SetSyncing(false) // defensive: don't carry stale sync state across workspaces
 	// Pane is left as-is -- the queued ChannelSelectedMsg below

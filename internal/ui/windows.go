@@ -86,6 +86,12 @@ func (a *App) focusWindow(id wintree.LeafID) tea.Cmd {
 
 // setFocusedWindowChannel records the applied channel selection on
 // the focused window. Called from the ChannelSelectedMsg apply path.
+//
+// KNOWN PHASE 2 LIMITATION: the selection applies to whichever window
+// is focused at APPLY time, not dispatch time. Rapid focus changes
+// (e.g. held ctrl+w w) can record a channel on the wrong window until
+// the next selection corrects it. Phase 3's per-window models replace
+// this path; do not inherit it silently.
 func (a *App) setFocusedWindowChannel(id, name, chType string) {
 	a.wins.SetChannel(a.focusedWin, wintree.Channel{ID: id, Name: name, Type: chType})
 }
