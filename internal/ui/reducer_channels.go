@@ -228,6 +228,13 @@ func (a *App) retargetActiveChannel(id, name, chType string) {
 	}
 	a.statusbar.SetChannel(name)
 	a.statusbar.SetChannelType(chType)
+	// Clear any syncing indicator stranded by an in-flight tier-2
+	// verify fetch: the SetSyncing(false) in the MessagesLoadedMsg arm
+	// is gated on the then-active channel, so a focus change away from
+	// the verifying channel would otherwise leave the glyph stuck.
+	// Safe for the selection path too — all three tiers set syncing
+	// explicitly right after this retarget runs.
+	a.statusbar.SetSyncing(false)
 }
 
 // reduceChannelSelected handles ChannelSelectedMsg. Extracted from

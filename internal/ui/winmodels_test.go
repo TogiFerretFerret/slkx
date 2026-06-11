@@ -59,6 +59,23 @@ func TestFocusWindow_IsPointerSwapNoDispatch(t *testing.T) {
 	}
 }
 
+// TestFocusWindow_ClearsStrandedSyncingIndicator: a window-focus
+// change must clear the syncing indicator left by a tier-2 verify
+// fetch that hasn't landed yet — the SetSyncing(false) in the
+// MessagesLoadedMsg arm is gated on the then-active channel, so
+// without a retarget-time clear the "○" glyph would persist until
+// the next channel selection. ("○" is unambiguous here: the only
+// other producer is the "○ Away" presence segment, and presence is
+// unset in the test app.)
+func TestFocusWindow_ClearsStrandedSyncingIndicator(t *testing.T) {
+	a, w1, _ := twoWindowApp(t)
+	a.statusbar.SetSyncing(true) // simulate in-flight tier-2 verify on C2
+	_ = a.focusWindow(w1)
+	if out := ansi.Strip(a.statusbar.View(200)); strings.Contains(out, "○") {
+		t.Fatalf("syncing indicator must clear on window focus change:\n%s", out)
+	}
+}
+
 func TestCloseWindow_EvictsModel(t *testing.T) {
 	a := newWideTestApp(t)
 	_ = a.splitWindow(wintree.SplitSideBySide)
