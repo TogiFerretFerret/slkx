@@ -18,6 +18,10 @@
 | `Up` | Insert | Previous line; on the first line, jump to start of message |
 | `Down` | Insert | Next line; on the last line, jump to end of message |
 | `gg` / `G` | Normal | Jump to top / bottom |
+| `/` | Normal | Search in channel (vim-style; searches cached history of the current channel) |
+| `n` / `N` | Normal | Next / previous search match (wraps) |
+| `Esc` | Normal (search active) | Clear active search |
+| `Ctrl+f` | Any | Search workspace (Slack server-side; supports modifiers like `from:@user`, `in:#channel`, `before:YYYY-MM-DD`) |
 | `Ctrl+b` | Any | Toggle sidebar |
 | `Ctrl+]` | Any | Toggle thread panel |
 | `Ctrl+t` / `Ctrl+p` | Any | Fuzzy channel finder |
