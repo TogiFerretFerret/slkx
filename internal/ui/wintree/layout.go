@@ -23,27 +23,39 @@ func layoutNode(n *node, r Rect) LayoutNode {
 		return LayoutNode{Leaf: true, ID: n.id, Rect: r}
 	}
 	out := LayoutNode{Rect: r, Dir: n.dir, Children: make([]LayoutNode, 0, len(n.children))}
-	k := len(n.children)
-	if n.dir == SplitSideBySide {
+	for i, cr := range childRects(n.dir, len(n.children), r) {
+		out.Children = append(out.Children, layoutNode(n.children[i], cr))
+	}
+	return out
+}
+
+// childRects divides r among k children along dir: equal shares, with
+// the remainder going to the earliest children one cell each, so the
+// results always tile r exactly. This is the single source of truth
+// for split geometry — Layout, nodeRect, and Split's refusal math all
+// depend on it agreeing with itself.
+func childRects(dir Dir, k int, r Rect) []Rect {
+	out := make([]Rect, 0, k)
+	if dir == SplitSideBySide {
 		base, rem := r.W/k, r.W%k
 		x := r.X
-		for i, c := range n.children {
+		for i := 0; i < k; i++ {
 			w := base
 			if i < rem {
 				w++
 			}
-			out.Children = append(out.Children, layoutNode(c, Rect{X: x, Y: r.Y, W: w, H: r.H}))
+			out = append(out, Rect{X: x, Y: r.Y, W: w, H: r.H})
 			x += w
 		}
 	} else {
 		base, rem := r.H/k, r.H%k
 		y := r.Y
-		for i, c := range n.children {
+		for i := 0; i < k; i++ {
 			h := base
 			if i < rem {
 				h++
 			}
-			out.Children = append(out.Children, layoutNode(c, Rect{X: r.X, Y: y, W: r.W, H: h}))
+			out = append(out, Rect{X: r.X, Y: y, W: r.W, H: h})
 			y += h
 		}
 	}
@@ -72,39 +84,21 @@ func (t *Tree) ComputeRects(bounds Rect) map[LeafID]Rect {
 func (t *Tree) nodeRect(target *node, bounds Rect) (Rect, bool) {
 	var found Rect
 	var ok bool
-	var walk func(n *node, r Rect)
-	walk = func(n *node, r Rect) {
+	var walk func(n *node, r Rect) bool
+	walk = func(n *node, r Rect) bool {
 		if n == target {
 			found, ok = r, true
-			return
+			return true
 		}
 		if n.isLeaf() {
-			return
+			return false
 		}
-		k := len(n.children)
-		if n.dir == SplitSideBySide {
-			base, rem := r.W/k, r.W%k
-			x := r.X
-			for i, c := range n.children {
-				w := base
-				if i < rem {
-					w++
-				}
-				walk(c, Rect{X: x, Y: r.Y, W: w, H: r.H})
-				x += w
-			}
-		} else {
-			base, rem := r.H/k, r.H%k
-			y := r.Y
-			for i, c := range n.children {
-				h := base
-				if i < rem {
-					h++
-				}
-				walk(c, Rect{X: r.X, Y: y, W: r.W, H: h})
-				y += h
+		for i, cr := range childRects(n.dir, len(n.children), r) {
+			if walk(n.children[i], cr) {
+				return true
 			}
 		}
+		return false
 	}
 	walk(t.root, bounds)
 	return found, ok
