@@ -95,7 +95,8 @@ type Appearance struct {
 	// emoji image (cells wide x 1 row tall). 2 (default) matches the
 	// East-Asian-Wide convention; 1 is an escape hatch if 2 looks too
 	// large in a given font. Clamped to {1, 2} at load time.
-	EmojiCells int `toml:"emoji_cells"`
+	EmojiCells   int  `toml:"emoji_cells"`
+	Transparency bool `toml:"transparency"`
 }
 
 type Animations struct {
@@ -177,6 +178,7 @@ func Default() Config {
 			MouseWheelLines: 3,
 			EmojiImages:     "on",
 			EmojiCells:      2,
+			Transparency:    false,
 		},
 		Animations: Animations{
 			Enabled:          true,

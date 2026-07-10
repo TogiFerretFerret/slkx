@@ -1474,16 +1474,16 @@ type cacheStyles struct {
 // when the cache last rebuilt. View() composes the hint fresh from
 // renderLoadingOlderHint(width) on every frame instead.
 func (m *Model) buildCacheStyles(width int) cacheStyles {
-	borderFill := lipgloss.NewStyle().Background(styles.Background)
-	borderInvis := lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(styles.Background).BorderBackground(styles.Background)
+	borderFill := styles.Bg(lipgloss.NewStyle(), styles.Background)
+	borderInvis := styles.Bbg(styles.Bg(lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(styles.Background), styles.Background), styles.Background)
 	borderSelect := lipgloss.NewStyle().
 		BorderStyle(thickLeftBorder).BorderLeft(true).
 		BorderForeground(styles.SelectionBorderColor(m.focused)).
 		BorderBackground(styles.SelectionTintColor(m.focused)).
 		Background(styles.SelectionTintColor(m.focused))
-	spacerBg := lipgloss.NewStyle().Background(styles.Background)
+	spacerBg := styles.Bg(lipgloss.NewStyle(), styles.Background)
 	m.cacheSpacer = spacerBg.Width(width).Render("")
-	hintStyle := lipgloss.NewStyle().Background(styles.Background).Foreground(styles.TextMuted)
+	hintStyle := styles.Bg(lipgloss.NewStyle(), styles.Background).Foreground(styles.TextMuted)
 	// NOTE: intentionally NOT width-padded. "more below" only appears when
 	// the content overflows the viewport, which is exactly the condition
 	// under which scrollbar.Overlay runs and normalizes every row to the
@@ -1510,7 +1510,7 @@ func (m *Model) renderLoadingOlderHint(width int) string {
 	// Width(width) pads to the full pane width so this transient top-row
 	// hint upholds the "every pane line is exactly width cells" invariant
 	// the app-layer border assembly relies on (ui.borderedTopPane).
-	hintStyle := lipgloss.NewStyle().Background(styles.Background).Foreground(styles.TextMuted).Width(width)
+	hintStyle := styles.Bg(lipgloss.NewStyle().Foreground(styles.TextMuted).Width(width), styles.Background)
 	frame := styles.SpinnerChars[m.spinnerFrame%len(styles.SpinnerChars)]
 	return hintStyle.Render("  " + string(frame) + " Loading older messages...")
 }
@@ -1734,8 +1734,8 @@ func (m *Model) buildCache(width int) {
 		if msgDate != "" && msgDate != lastDate {
 			label := FormatDateSeparator(msgDate)
 			sepStr := "── " + label + " ──"
-			sep := lipgloss.NewStyle().Background(styles.Background).Foreground(styles.TextMuted).Bold(true).
-				Width(width).Align(lipgloss.Center).
+			sep := styles.Bg(lipgloss.NewStyle().Foreground(styles.TextMuted).Bold(true).
+				Width(width).Align(lipgloss.Center), styles.Background).
 				Render(sepStr)
 			appendSeparator(sep)
 			lastDate = msgDate
@@ -1744,8 +1744,8 @@ func (m *Model) buildCache(width int) {
 		// New message landmark: insert before the first unread message
 		if m.lastReadTS != "" && !newMsgLandmarkInserted && msg.TS > m.lastReadTS {
 			newStr := "── new ──"
-			label := lipgloss.NewStyle().Background(styles.Background).Foreground(styles.Error).Bold(true).
-				Width(width).Align(lipgloss.Center).
+			label := styles.Bg(lipgloss.NewStyle().Foreground(styles.Error).Bold(true).
+				Width(width).Align(lipgloss.Center), styles.Background).
 				Render(newStr)
 			appendSeparator(label)
 			newMsgLandmarkInserted = true
@@ -1891,7 +1891,7 @@ func (m *Model) blockkitContext(msg MessageItem, userNames, channelNames map[str
 func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string, userNames map[string]string, channelNames map[string]string, isSelected bool, stats *entryPerfStats) (
 	content string, flushes []func(io.Writer) error, sixelRows map[int]sixelEntry, hits []entryHit, reactionHits []reactionEntryHit,
 ) {
-	line := styles.Username.Render(msg.UserName) + lipgloss.NewStyle().Background(styles.Background).Render("  ") + styles.Timestamp.Render(msg.Timestamp)
+	line := styles.Username.Render(msg.UserName) + styles.Bg(lipgloss.NewStyle(), styles.Background).Render("  ") + styles.Timestamp.Render(msg.Timestamp)
 
 	// If we have an avatar, reserve space on the left for it
 	contentWidth := width - 4
@@ -2043,7 +2043,7 @@ func (m *Model) renderMessagePlain(msg MessageItem, width int, avatarStr string,
 		// Join pills with wrapping. emojiutil.Width() consults the
 		// terminal-probed width cache so wrapping decisions match what
 		// the user's terminal will actually render.
-		bgSpace := lipgloss.NewStyle().Background(styles.Background).Render(" ")
+		bgSpace := styles.Bg(lipgloss.NewStyle(), styles.Background).Render(" ")
 		var reactionLines []string
 		currentLine := ""
 		lineIdx := 0
@@ -2340,10 +2340,10 @@ func placeAvatarBeside(avatar, content string) string {
 		var left, right string
 
 		if i < len(avatarLines) {
-			left = avatarLines[i] + lipgloss.NewStyle().Background(styles.Background).Render(" ")
+			left = avatarLines[i] + styles.Bg(lipgloss.NewStyle(), styles.Background).Render(" ")
 		} else {
 			// Empty space where avatar was (maintain alignment)
-			left = lipgloss.NewStyle().Background(styles.Background).Width(avatarWidth).Render("")
+			left = styles.Bg(lipgloss.NewStyle(), styles.Background).Width(avatarWidth).Render("")
 		}
 
 		if i < len(contentLines) {
@@ -2783,12 +2783,11 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 		// looking line below it" effect that visually separated the
 		// header from the messages and made the title look like it sat
 		// outside the panel.
-		headerStyle := lipgloss.NewStyle().
+		headerStyle := styles.Bg(lipgloss.NewStyle().
 			Width(width).
-			Background(styles.Background).
 			Foreground(styles.TextPrimary).
 			Bold(true).
-			Padding(0, 1)
+			Padding(0, 1), styles.Background)
 		header := headerStyle.Render(fmt.Sprintf("%s %s", channelGlyph(m.channelType), m.channelName))
 		if m.channelTopic != "" {
 			// Width(width) pads every wrapped topic line to the full pane
@@ -2796,7 +2795,7 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			// exactly `width` display cells, which lets the app layer
 			// assemble the pane border by concatenation (no per-frame
 			// grapheme re-measurement). See ui.borderedTopPane.
-			topicStyle := styles.Timestamp.Width(width).Background(styles.Background)
+			topicStyle := styles.Bg(styles.Timestamp.Width(width), styles.Background)
 			header += "\n" + topicStyle.Render(WordWrap(m.channelTopic, width))
 		}
 		m.chromeCache = header
@@ -2838,11 +2837,10 @@ func (m *Model) viewInternal(height, width int, applySelection bool) string {
 			frame := styles.SpinnerChars[m.spinnerFrame%len(styles.SpinnerChars)]
 			text = string(frame) + " Loading messages..."
 		}
-		empty := lipgloss.NewStyle().
+		empty := styles.Bg(lipgloss.NewStyle().
 			Width(width).
 			Height(msgAreaHeight).
-			Foreground(styles.TextMuted).
-			Background(styles.Background).
+			Foreground(styles.TextMuted), styles.Background).
 			Render(text)
 		return chrome + "\n" + empty
 	}

@@ -269,6 +269,11 @@ func (r *fakeResolver) Request(userID string) {
 	defer r.mu.Unlock()
 	r.seen = append(r.seen, userID)
 }
+func (r *fakeResolver) RequestMany(userIDs []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, userIDs...)
+}
 func (r *fakeResolver) snapshot() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -276,45 +281,7 @@ func (r *fakeResolver) snapshot() []string {
 	copy(out, r.seen)
 	return out
 }
-
-func TestBackgroundFetchTriggersResolverForEachID(t *testing.T) {
-	db, _ := cache.New(":memory:")
-	defer db.Close()
-	_ = db.UpsertWorkspace(cache.Workspace{ID: "T1", Name: "Test"})
-
-	api := &fakeMemberAPI{result: []string{"U1", "U2", "U3"}}
-	sink := &captureSink{}
-	resolver := &fakeResolver{}
-	mgr := New("T1", api, db, sink.Push, resolver)
-
-	mgr.EnsureFresh(context.Background(), "C1")
-	waitForCallCount(t, api, 1)
-	waitForPush(t, sink, 2)
-
-	// Brief settle for the resolver Request calls.
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if len(resolver.snapshot()) >= 3 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	seen := resolver.snapshot()
-	if len(seen) != 3 {
-		t.Fatalf("expected resolver to see 3 IDs; got %v", seen)
-	}
-	// Verify each ID is present (order not required).
-	want := map[string]bool{"U1": true, "U2": true, "U3": true}
-	for _, id := range seen {
-		if !want[id] {
-			t.Errorf("unexpected ID %s", id)
-		}
-		delete(want, id)
-	}
-	if len(want) != 0 {
-		t.Errorf("missing IDs: %v", want)
-	}
-}
+// Removed TestBackgroundFetchTriggersResolverForEachID because eager member lookup on channel switch was disabled to fix lag.
 
 func TestEnsureFreshConcurrentDoesNotDuplicate(t *testing.T) {
 	mgr, api, _, db := newManagerForTest(t)

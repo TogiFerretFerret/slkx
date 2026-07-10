@@ -59,8 +59,8 @@ func addWorkspace() error {
 	fmt.Println(dimStyle.Render("     Find the cookie named 'd' and copy its value"))
 	fmt.Println(dimStyle.Render("  d. Go to the Console tab and run:"))
 	fmt.Println(dimStyle.Render("     Object.entries(JSON.parse(localStorage.localConfig_v2).teams).forEach(([id,t]) => console.log(t.name, t.token))"))
-	fmt.Println(dimStyle.Render("     This prints the name and xoxc token for each workspace."))
-	fmt.Println(dimStyle.Render("     Copy the xoxc-... token for the workspace you want to add."))
+	fmt.Println(dimStyle.Render("     This prints the name and token for each workspace."))
+	fmt.Println(dimStyle.Render("     Copy the xoxc-... or xoxp-... token for the workspace you want to add."))
 	fmt.Println()
 
 	// Step 2: Enter tokens via huh form
@@ -85,17 +85,17 @@ func addWorkspace() error {
 				}),
 
 			huh.NewInput().
-				Title("Token (xoxc)").
-				Description("The xoxc-... token from your browser console").
-				Placeholder("xoxc-...").
+				Title("Token (xoxc/xoxp)").
+				Description("The xoxc-... or xoxp-... token from your browser console").
+				Placeholder("xoxc-... or xoxp-...").
 				Value(&xoxcToken).
 				Validate(func(s string) error {
 					s = strings.TrimSpace(s)
 					if s == "" {
 						return fmt.Errorf("token is required")
 					}
-					if !strings.HasPrefix(s, "xoxc-") {
-						return fmt.Errorf("must start with xoxc-")
+					if !strings.HasPrefix(s, "xoxc-") && !strings.HasPrefix(s, "xoxp-") {
+						return fmt.Errorf("must start with xoxc- or xoxp-")
 					}
 					return nil
 				}),

@@ -26,6 +26,7 @@ type ConversationMemberAPI interface {
 // wired in Task 12.
 type UserResolver interface {
 	Request(userID string)
+	RequestMany(userIDs []string)
 }
 
 // PushFunc is invoked by Manager whenever a channel's membership has
@@ -159,11 +160,6 @@ func (m *Manager) backgroundFetch(ctx context.Context, channelID string) {
 	ids, err := m.api.GetUsersInConversation(ctx, channelID)
 	if err != nil {
 		return
-	}
-	if m.resolver != nil {
-		for _, id := range ids {
-			m.resolver.Request(id)
-		}
 	}
 	now := time.Now().Unix()
 	if err := m.db.ReplaceChannelMembers(m.workspaceID, channelID, ids, now); err != nil {

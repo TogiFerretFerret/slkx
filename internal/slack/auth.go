@@ -17,6 +17,7 @@ type Token struct {
 	Cookie      string `json:"cookie"`       // d cookie value
 	TeamID      string `json:"team_id"`
 	TeamName    string `json:"team_name"`
+	AppToken    string `json:"app_token,omitempty"` // App-level token starting with xapp- for Socket Mode
 }
 
 // TokenStore persists Slack tokens as JSON files in a directory,

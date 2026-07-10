@@ -17,6 +17,7 @@ import (
 	"github.com/gammons/slk/internal/slackhttp"
 	"github.com/gorilla/websocket"
 	"github.com/slack-go/slack"
+	"github.com/slack-go/slack/socketmode"
 )
 
 // SlackAPI defines the subset of the Slack API we use.
@@ -69,6 +70,9 @@ type Client struct {
 	token  string
 	cookie string
 
+	appToken string
+	wsCancel context.CancelFunc
+
 	// apiBaseURL is the workspace-specific Web API root, e.g.
 	// "https://slack.com/api/" for non-grid workspaces or
 	// "https://hackclub.enterprise.slack.com/api/" for enterprise grids.
@@ -89,6 +93,10 @@ type Client struct {
 	// constructed directly in tests (e.g., &Client{api: mock}); in
 	// that case Connect() leaves the existing api field alone.
 	httpClient *http.Client
+}
+
+func (c *Client) SetAppToken(appToken string) {
+	c.appToken = appToken
 }
 
 // NewClient creates a new Slack client using browser cookie auth.
@@ -179,10 +187,16 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.teamURL = resp.URL
 
 	if c.httpClient != nil {
-		c.api = slack.New(
-			c.token,
+		opts := []slack.Option{
 			slack.OptionHTTPClient(c.httpClient),
 			slack.OptionAPIURL(c.apiBaseURL),
+		}
+		if c.appToken != "" {
+			opts = append(opts, slack.OptionAppLevelToken(c.appToken))
+		}
+		c.api = slack.New(
+			c.token,
+			opts...,
 		)
 	}
 
@@ -256,15 +270,110 @@ func wsUpgradeHeaders() http.Header {
 // Events are dispatched to the provided handler in a goroutine.
 // Call this after Connect.
 func (c *Client) StartWebSocket(handler EventHandler) error {
-	wsURL := fmt.Sprintf(
-		"wss://wss-primary.slack.com/?token=%s&sync_desync=1&slack_client=desktop&start_args=%%3Fagent%%3Dclient%%26connect_only%%3Dtrue%%26ms_latest%%3Dtrue&no_query_on_subscribe=1&flannel=3&lazy_channels=1&gateway_server=%s-1&batch_presence_aware=1",
-		url.QueryEscape(c.token),
-		c.teamID,
-	)
+	if c.appToken != "" {
+		slackClient, ok := c.api.(*slack.Client)
+		if !ok {
+			return fmt.Errorf("socket mode requires a concrete slack-go client")
+		}
+		socketClient := socketmode.New(slackClient)
+		c.wsDone = make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
+		c.wsCancel = cancel
 
-	jar := newCookieJar(c.cookie)
+		go func() {
+			defer close(c.wsDone)
+			defer handler.OnDisconnect()
+
+			go func() {
+				if err := socketClient.RunContext(ctx); err != nil {
+					debuglog.WS("Socket Mode Run error: %v", err)
+				}
+			}()
+
+			for {
+				select {
+				case <-ctx.Done():
+					debuglog.WS("Socket Mode event loop context done")
+					return
+				case evt, open := <-socketClient.Events:
+					if !open {
+						debuglog.WS("Socket Mode Events channel closed")
+						return
+					}
+					debuglog.WS("Socket Mode event: type=%s", evt.Type)
+					switch evt.Type {
+					case socketmode.EventTypeHello:
+						debuglog.WS("Socket Mode connected (EventTypeHello)")
+						handler.OnConnect()
+					case socketmode.EventTypeEventsAPI:
+						if evt.Request != nil {
+							socketClient.Ack(*evt.Request)
+							debuglog.WS("Socket Mode Acked request. Payload: %s", string(evt.Request.Payload))
+							var payload struct {
+								Event json.RawMessage `json:"event"`
+							}
+							if err := json.Unmarshal(evt.Request.Payload, &payload); err != nil {
+								debuglog.WS("Socket Mode unmarshal error: %v", err)
+							} else if len(payload.Event) == 0 {
+								debuglog.WS("Socket Mode payload event field is empty")
+							} else {
+								debuglog.WS("Socket Mode dispatching inner event: %s", string(payload.Event))
+								dispatchWebSocketEvent(payload.Event, handler)
+							}
+						} else {
+							debuglog.WS("Socket Mode EventsAPI request is nil")
+						}
+					case socketmode.EventTypeDisconnect:
+						debuglog.WS("Socket Mode disconnect event received")
+					}
+				}
+			}
+		}()
+		return nil
+	}
+
+	var wsURL string
+
+	// 1. Try rtm.connect first (does not require a cookie and works for bot/user tokens with rtm:stream scope)
+	rtmURL := fmt.Sprintf("https://slack.com/api/rtm.connect?token=%s", url.QueryEscape(c.token))
+	httpReq, err := http.NewRequest(http.MethodPost, rtmURL, nil)
+	if err == nil {
+		hc := c.httpClient
+		if hc == nil {
+			hc = http.DefaultClient
+		}
+		resp, err := hc.Do(httpReq)
+		if err == nil {
+			defer resp.Body.Close()
+			var rtmResp struct {
+				OK    bool   `json:"ok"`
+				URL   string `json:"url"`
+				Error string `json:"error"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&rtmResp) == nil && rtmResp.OK && rtmResp.URL != "" {
+				wsURL = rtmResp.URL
+				debuglog.WS("rtm.connect succeeded, using RTM URL: %s", wsURL)
+			} else {
+				debuglog.WS("rtm.connect failed or returned ok=false: %s", rtmResp.Error)
+			}
+		} else {
+			debuglog.WS("rtm.connect HTTP request failed: %v", err)
+		}
+	}
+
+	// 2. Fall back to internal flannel desktop WebSocket if rtm.connect failed/was not available
+	var jar http.CookieJar
+	if wsURL == "" {
+		wsURL = fmt.Sprintf(
+			"wss://wss-primary.slack.com/?token=%s&sync_desync=1&slack_client=desktop&start_args=%%3Fagent%%3Dclient%%26connect_only%%3Dtrue%%26ms_latest%%3Dtrue&no_query_on_subscribe=1&flannel=3&lazy_channels=1&gateway_server=%s-1&batch_presence_aware=1",
+			url.QueryEscape(c.token),
+			c.teamID,
+		)
+		jar = newCookieJar(c.cookie)
+		debuglog.WS("Using fallback desktop flannel WebSocket: %s", wsURL)
+	}
+
 	dialer := &websocket.Dialer{Jar: jar}
-
 	conn, _, err := dialer.Dial(wsURL, wsUpgradeHeaders())
 	if err != nil {
 		return fmt.Errorf("websocket connect failed: %w", err)
@@ -312,8 +421,16 @@ func (c *Client) StartWebSocket(handler EventHandler) error {
 
 // StopWebSocket disconnects the WebSocket connection.
 func (c *Client) StopWebSocket() error {
+	c.wsMu.Lock()
+	defer c.wsMu.Unlock()
+	if c.wsCancel != nil {
+		c.wsCancel()
+		c.wsCancel = nil
+	}
 	if c.wsConn != nil {
-		return c.wsConn.Close()
+		err := c.wsConn.Close()
+		c.wsConn = nil
+		return err
 	}
 	return nil
 }

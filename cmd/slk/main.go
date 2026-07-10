@@ -336,6 +336,89 @@ func (r *userResolver) Request(userID string) {
 	}()
 }
 
+// RequestMany enqueues users.info fetches for multiple userIDs.
+// Checks the local database in a single batch to filter out already-cached
+// users and avoids N+1 queries.
+func (r *userResolver) RequestMany(userIDs []string) {
+	if r == nil || len(userIDs) == 0 {
+		return
+	}
+
+	// Filter out user IDs that are already in-flight
+	var toCheck []string
+	for _, id := range userIDs {
+		if id == "" {
+			continue
+		}
+		if _, exists := r.inflight.LoadOrStore(id, struct{}{}); !exists {
+			toCheck = append(toCheck, id)
+		}
+	}
+
+	if len(toCheck) == 0 {
+		return
+	}
+
+	// Bulk lookup in SQLite database
+	cachedMap, err := r.db.FilterCachedUsers(toCheck)
+	if err != nil {
+		for _, id := range toCheck {
+			r.inflight.Delete(id)
+		}
+		return
+	}
+
+	// For any uncached user ID, spawn a background fetch goroutine
+	for _, id := range toCheck {
+		if _, isCached := cachedMap[id]; isCached {
+			r.inflight.Delete(id)
+		} else {
+			userID := id // copy loop variable
+			go func() {
+				defer r.inflight.Delete(userID)
+				u, err := r.client.GetUserProfile(userID)
+				if err != nil {
+					debuglog.Cache("userResolver: GetUserProfile team=%s user=%s err=%v",
+						r.teamID, userID, err)
+					return
+				}
+				name := u.Profile.DisplayName
+				if name == "" {
+					name = u.RealName
+				}
+				if name == "" {
+					name = u.Name
+				}
+				isBot := u.IsBot || u.IsAppUser
+				isExternal := u.TeamID != "" && u.TeamID != r.teamID
+
+				r.avatars.Preload(userID, u.Profile.Image32)
+				_ = r.db.UpsertUser(cache.User{
+					ID:          userID,
+					WorkspaceID: r.teamID,
+					Name:        u.Name,
+					DisplayName: name,
+					AvatarURL:   u.Profile.Image32,
+					Presence:    "away",
+					IsBot:       isBot,
+					IsExternal:  isExternal,
+				})
+				if r.send != nil {
+					r.send(ui.UserResolvedMsg{
+						TeamID:      r.teamID,
+						UserID:      userID,
+						DisplayName: name,
+						IsBot:       isBot,
+					})
+				}
+				if isExternal && r.send != nil {
+					r.send(ui.UserExternalMsg{UserID: userID, IsExternal: true})
+				}
+			}()
+		}
+	}
+}
+
 // RequestBot enqueues a bots.info fetch for a bot author (bot_message has
 // no `user`, only a `bot_id`). Keyed by botID so the resolved name +
 // avatar attach to messages whose UserID was set to the bot_id. username
@@ -547,6 +630,7 @@ func run() error {
 	// WorkspaceReadyMsg.Theme once that workspace finishes connecting,
 	// which avoids a flash of the wrong theme without needing to know
 	// the active TeamID up front (workspaces connect in goroutines).
+	styles.Transparency = true
 	styles.Apply(cfg.Appearance.Theme, cfg.Theme)
 
 	notifier := notify.New(cfg.Notifications.Enabled)
@@ -1760,6 +1844,9 @@ func run() error {
 
 func connectWorkspace(ctx context.Context, token slackclient.Token, db *cache.DB, cfg config.Config, avatarCache *avatar.Cache, p *tea.Program) (*WorkspaceContext, error) {
 	client := slackclient.NewClient(token.AccessToken, token.Cookie)
+	if token.AppToken != "" {
+		client.SetAppToken(token.AppToken)
+	}
 	if err := client.Connect(ctx); err != nil {
 		return nil, fmt.Errorf("connecting %s: %w", token.TeamName, err)
 	}

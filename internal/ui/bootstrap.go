@@ -230,6 +230,13 @@ func (b *workspaceBootstrap) Render(width, height int, spinnerGlyph string) stri
 		Padding(1, 2).
 		Render(content)
 
+	if styles.Transparency {
+		return lipgloss.Place(width, height,
+			lipgloss.Center, lipgloss.Center,
+			box,
+		)
+	}
+
 	return lipgloss.Place(width, height,
 		lipgloss.Center, lipgloss.Center,
 		box,

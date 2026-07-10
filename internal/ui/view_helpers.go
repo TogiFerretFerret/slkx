@@ -118,7 +118,8 @@ func stackContentStatus(content, status string) string {
 // lipgloss.Width(s) to avoid ANSI miscounting in complex rendered
 // content (e.g. nested borders, mixed-foreground spans).
 func exactSizeBg(s string, w, h int, bg color.Color) string {
-	return lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h).Background(bg).Render(s)
+	style := lipgloss.NewStyle().Width(w).Height(h).MaxHeight(h)
+	return styles.Bg(style, bg).Render(s)
 }
 
 // exactSize is exactSizeBg with the default theme background.
@@ -217,7 +218,7 @@ func borderedPaneCore(content string, innerWidth, fullWidth, rows int, focused b
 	fg := bs.GetBorderTopForeground()
 	bbg := bs.GetBorderTopBackground()
 
-	edge := lipgloss.NewStyle().Foreground(fg).Background(bbg)
+	edge := styles.Bg(lipgloss.NewStyle().Foreground(fg), bbg)
 	left := edge.Render(bd.Left)
 	right := edge.Render(bd.Right)
 	topEdge := edge.Render(bd.TopLeft + strings.Repeat(bd.Top, innerWidth) + bd.TopRight)
@@ -225,9 +226,9 @@ func borderedPaneCore(content string, innerWidth, fullWidth, rows int, focused b
 	gutterCols := fullWidth - (innerWidth + 2)
 	gutter := ""
 	if gutterCols > 0 {
-		gutter = lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", gutterCols))
+		gutter = styles.Bg(lipgloss.NewStyle(), bg).Render(strings.Repeat(" ", gutterCols))
 	}
-	blankInner := lipgloss.NewStyle().Background(bg).Width(innerWidth).Render("")
+	blankInner := styles.Bg(lipgloss.NewStyle(), bg).Width(innerWidth).Render("")
 
 	lines := strings.Split(content, "\n")
 	var b strings.Builder
@@ -262,7 +263,7 @@ func padPaneToSize(s string, srcWidth, w, h int, bg color.Color) string {
 	gutterCols := w - srcWidth
 	gutter := ""
 	if gutterCols > 0 {
-		gutter = lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", gutterCols))
+		gutter = styles.Bg(lipgloss.NewStyle(), bg).Render(strings.Repeat(" ", gutterCols))
 	}
 	lines := strings.Split(s, "\n")
 	var b strings.Builder
@@ -278,7 +279,7 @@ func padPaneToSize(s string, srcWidth, w, h int, bg color.Color) string {
 		} else {
 			// Height underflow: themed blank row at the full width
 			// (matches exactSize's vertical padding behavior).
-			b.WriteString(lipgloss.NewStyle().Background(bg).Width(w).Render(""))
+			b.WriteString(styles.Bg(lipgloss.NewStyle(), bg).Width(w).Render(""))
 		}
 	}
 	return b.String()

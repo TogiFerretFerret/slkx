@@ -288,8 +288,7 @@ func (m Model) View(width int) string {
 		rightParts = append(rightParts,
 			lipgloss.NewStyle().Foreground(styles.Warning).Background(styles.SurfaceDark).Render("● Connecting"))
 	case StateDisconnected:
-		rightParts = append(rightParts,
-			lipgloss.NewStyle().Foreground(styles.Error).Background(styles.SurfaceDark).Render("● Disconnected"))
+		// Do nothing, hide the disconnected status
 	}
 
 	// The :command prompt owns the left side while active (the

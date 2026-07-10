@@ -334,8 +334,20 @@ func SelectionTintBgANSI(focused bool) string {
 // substring replacement would collide with literal digits in content
 // and with 256-color sub-arguments such as "38;5;40".
 func RepaintBgToSelectionTint(s string, focused bool) string {
-	from := bgSGRParams(BgANSI())
-	to := bgSGRParams(SelectionTintBgANSI(focused))
+	toAnsi := SelectionTintBgANSI(focused)
+	if toAnsi == "" {
+		return s
+	}
+	fromAnsi := BgANSI()
+	if fromAnsi == "" {
+		// When Transparency is true, BgANSI() is empty.
+		// ReapplyBgAfterResets inside RenderSlackMarkdown only reapplied FgANSI after resets.
+		// To paint the selection background, we must append the SelectionTintBgANSI
+		// to every reset (\x1b[m) in the string.
+		return ReapplyBgAfterResets(s, toAnsi)
+	}
+	from := bgSGRParams(fromAnsi)
+	to := bgSGRParams(toAnsi)
 	if from == "" || from == to {
 		return s
 	}
@@ -495,6 +507,16 @@ func isBasicBgParam(s string) bool {
 // For ansi.IndexedColor it emits the 256-color form (\x1b[48;5;Nm).
 // Otherwise it falls back to truecolor (\x1b[48;2;R;G;Bm).
 func bgANSIFor(c color.Color) string {
+	if c == nil {
+		return ""
+	}
+	if _, ok := c.(lipgloss.NoColor); ok {
+		return ""
+	}
+	r, g, b, a := c.RGBA()
+	if a == 0 {
+		return ""
+	}
 	switch v := c.(type) {
 	case ansi.BasicColor:
 		if v < 8 {
@@ -507,13 +529,22 @@ func bgANSIFor(c color.Color) string {
 	case ansi.IndexedColor:
 		return fmt.Sprintf("\x1b[48;5;%dm", int(v))
 	}
-	r, g, b, _ := c.RGBA()
 	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r>>8, g>>8, b>>8)
 }
 
 // fgANSIFor returns the ANSI foreground-color escape for c.
 // See bgANSIFor for the type-switch rationale.
 func fgANSIFor(c color.Color) string {
+	if c == nil {
+		return ""
+	}
+	if _, ok := c.(lipgloss.NoColor); ok {
+		return ""
+	}
+	r, g, b, a := c.RGBA()
+	if a == 0 {
+		return ""
+	}
 	switch v := c.(type) {
 	case ansi.BasicColor:
 		if v < 8 {
@@ -525,7 +556,6 @@ func fgANSIFor(c color.Color) string {
 	case ansi.IndexedColor:
 		return fmt.Sprintf("\x1b[38;5;%dm", int(v))
 	}
-	r, g, b, _ := c.RGBA()
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r>>8, g>>8, b>>8)
 }
 

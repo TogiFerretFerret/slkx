@@ -43,7 +43,7 @@ var (
 
 	// Panel styles
 	FocusedBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.ThickBorder()).
+			BorderStyle(lipgloss.RoundedBorder()).
 			BorderForeground(Primary).
 			BorderBackground(Background).
 			Background(Background)
@@ -252,6 +252,9 @@ var (
 // any caches that depend on theme colors / styles.
 var version int64
 
+// Transparency determines whether the background colors are ignored (transparent).
+var Transparency bool
+
 // Version returns the current theme version, incremented on every Apply call.
 func Version() int64 { return version }
 
@@ -260,6 +263,18 @@ func Version() int64 { return version }
 func Apply(themeName string, overrides config.Theme) {
 	version++
 	colors := lookupTheme(themeName)
+
+	if Transparency {
+		colors.Background = ""
+		colors.Surface = ""
+		colors.SurfaceDark = ""
+		colors.SidebarBackground = ""
+		colors.RailBackground = ""
+		colors.ComposeInsertBG = ""
+		overrides.Background = ""
+		overrides.Surface = ""
+		overrides.SurfaceDark = ""
+	}
 
 	Primary = lipgloss.Color(colors.Primary)
 	Secondary = lipgloss.Color("#666666")
@@ -392,72 +407,60 @@ func SelectionBorderColor(focused bool) color.Color {
 	return TextMuted
 }
 
+// Bg conditionally applies background color unless Transparency is enabled.
+func Bg(s lipgloss.Style, c color.Color) lipgloss.Style {
+	if Transparency {
+		return s
+	}
+	return s.Background(c)
+}
+
+// Bbg conditionally applies border background color unless Transparency is enabled.
+func Bbg(s lipgloss.Style, c color.Color) lipgloss.Style {
+	if Transparency {
+		return s
+	}
+	return s.BorderBackground(c)
+}
+
 func buildStyles() {
-	FocusedBorder = lipgloss.NewStyle().
-		BorderStyle(lipgloss.ThickBorder()).BorderForeground(Primary).BorderBackground(Background).Background(Background)
-	UnfocusedBorder = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).BorderForeground(Border).BorderBackground(Background).Background(Background)
+	FocusedBorder = Bbg(Bg(lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(Primary), Background), Background)
+	UnfocusedBorder = Bbg(Bg(lipgloss.NewStyle().BorderStyle(lipgloss.RoundedBorder()).BorderForeground(Border), Background), Background)
 	WorkspaceActive = lipgloss.NewStyle().
 		Background(Primary).Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true).Padding(0, 1).Align(lipgloss.Center)
-	WorkspaceInactive = lipgloss.NewStyle().
-		Background(RailBackground).Foreground(SidebarText).
-		Padding(0, 1).Align(lipgloss.Center)
-	ChannelSelected = lipgloss.NewStyle().
-		Background(SidebarBackground).Foreground(SidebarText).Bold(true).Padding(0, 1)
-	ChannelNormal = lipgloss.NewStyle().
-		Background(SidebarBackground).Foreground(SidebarTextMuted).Padding(0, 1)
-	ChannelUnread = lipgloss.NewStyle().
-		Background(SidebarBackground).Foreground(SidebarText).Bold(true).Padding(0, 1)
-	ChannelMuted = lipgloss.NewStyle().
-		Background(SidebarBackground).Foreground(SidebarTextMuted).Padding(0, 1)
+	WorkspaceInactive = Bg(lipgloss.NewStyle().Foreground(SidebarText).Padding(0, 1).Align(lipgloss.Center), RailBackground)
+	ChannelSelected = Bg(lipgloss.NewStyle().Foreground(SidebarText).Bold(true).Padding(0, 1), SidebarBackground)
+	ChannelNormal = Bg(lipgloss.NewStyle().Foreground(SidebarTextMuted).Padding(0, 1), SidebarBackground)
+	ChannelUnread = Bg(lipgloss.NewStyle().Foreground(SidebarText).Bold(true).Padding(0, 1), SidebarBackground)
+	ChannelMuted = Bg(lipgloss.NewStyle().Foreground(SidebarTextMuted).Padding(0, 1), SidebarBackground)
 	UnreadBadge = lipgloss.NewStyle().
 		Background(Error).Foreground(lipgloss.Color("#FFFFFF")).Padding(0, 1)
-	SectionHeader = lipgloss.NewStyle().
-		Background(SidebarBackground).Foreground(SidebarTextMuted).Bold(true).Padding(0, 1)
-	Username = lipgloss.NewStyle().
-		Background(Background).Foreground(Primary).Bold(true)
-	Timestamp = lipgloss.NewStyle().
-		Background(Background).Foreground(TextMuted).Italic(true)
-	MessageText = lipgloss.NewStyle().
-		Background(Background).Foreground(TextPrimary)
-	ThreadIndicator = lipgloss.NewStyle().
-		Background(Background).Foreground(Primary).Italic(true)
-	StatusBar = lipgloss.NewStyle().
-		Background(SurfaceDark).Foreground(TextPrimary).Padding(0, 1)
+	SectionHeader = Bg(lipgloss.NewStyle().Foreground(SidebarTextMuted).Bold(true).Padding(0, 1), SidebarBackground)
+	Username = Bg(lipgloss.NewStyle().Foreground(Primary).Bold(true), Background)
+	Timestamp = Bg(lipgloss.NewStyle().Foreground(TextMuted).Italic(true), Background)
+	MessageText = Bg(lipgloss.NewStyle().Foreground(TextPrimary), Background)
+	ThreadIndicator = Bg(lipgloss.NewStyle().Foreground(Primary).Italic(true), Background)
+	StatusBar = Bg(lipgloss.NewStyle().Foreground(TextPrimary).Padding(0, 1), SurfaceDark)
 	StatusMode = lipgloss.NewStyle().
 		Background(Primary).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1)
 	StatusModeInsert = lipgloss.NewStyle().
 		Background(Accent).Foreground(lipgloss.Color("#FFFFFF")).Bold(true).Padding(0, 1)
 	StatusModeCommand = lipgloss.NewStyle().
 		Background(Warning).Foreground(lipgloss.Color("#000000")).Bold(true).Padding(0, 1)
-	StatusbarSyncing = lipgloss.NewStyle().
-		Background(SurfaceDark).Foreground(TextMuted)
-	ComposeBox = lipgloss.NewStyle().
-		BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(Border).BorderBackground(SurfaceDark).
-		Background(SurfaceDark).Foreground(TextPrimary).Padding(1, 1, 1, 1)
-	ComposeFocused = lipgloss.NewStyle().
-		BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(Primary).BorderBackground(SurfaceDark).
-		Background(SurfaceDark).Foreground(TextPrimary).Padding(1, 1, 1, 1)
-	ComposeInsert = lipgloss.NewStyle().
-		BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(Accent).BorderBackground(ComposeInsertBG).
-		Background(ComposeInsertBG).Foreground(TextPrimary).Padding(1, 1, 1, 1)
+	StatusbarSyncing = Bg(lipgloss.NewStyle().Foreground(TextMuted), SurfaceDark)
+	ComposeBox = Bbg(Bg(lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(Border).Foreground(TextPrimary).Padding(1, 1, 1, 1), SurfaceDark), SurfaceDark)
+	ComposeFocused = Bbg(Bg(lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(Primary).Foreground(TextPrimary).Padding(1, 1, 1, 1), SurfaceDark), SurfaceDark)
+	ComposeInsert = Bbg(Bg(lipgloss.NewStyle().BorderStyle(thickLeftBorder).BorderLeft(true).BorderForeground(Accent).Foreground(TextPrimary).Padding(1, 1, 1, 1), ComposeInsertBG), ComposeInsertBG)
 	PresenceOnline = lipgloss.NewStyle().Foreground(Accent)
 	PresenceAway = lipgloss.NewStyle().Foreground(TextMuted)
-	ReactionPillOwn = lipgloss.NewStyle().
-		Background(Surface).Foreground(Accent).Padding(0, 1)
-	ReactionPillOther = lipgloss.NewStyle().
-		Background(Surface).Foreground(TextMuted).Padding(0, 1)
-	ReactionPillSelected = lipgloss.NewStyle().
-		Background(Surface).Foreground(Primary).Padding(0, 1)
-	ReactionPillPlus = lipgloss.NewStyle().
-		Background(Surface).Foreground(Primary).Padding(0, 1)
-	DateSeparator = lipgloss.NewStyle().
-		Background(Background).Foreground(TextMuted).Bold(true).Align(lipgloss.Center)
-	NewMessageSeparator = lipgloss.NewStyle().
-		Background(Background).Foreground(Error).Bold(true).Align(lipgloss.Center)
-	TypingIndicator = lipgloss.NewStyle().
-		Background(Background).Foreground(TextMuted).Italic(true).PaddingLeft(2)
+	ReactionPillOwn = Bg(lipgloss.NewStyle().Foreground(Accent).Padding(0, 1), Surface)
+	ReactionPillOther = Bg(lipgloss.NewStyle().Foreground(TextMuted).Padding(0, 1), Surface)
+	ReactionPillSelected = Bg(lipgloss.NewStyle().Foreground(Primary).Padding(0, 1), Surface)
+	ReactionPillPlus = Bg(lipgloss.NewStyle().Foreground(Primary).Padding(0, 1), Surface)
+	DateSeparator = Bg(lipgloss.NewStyle().Foreground(TextMuted).Bold(true).Align(lipgloss.Center), Background)
+	NewMessageSeparator = Bg(lipgloss.NewStyle().Foreground(Error).Bold(true).Align(lipgloss.Center), Background)
+	TypingIndicator = Bg(lipgloss.NewStyle().Foreground(TextMuted).Italic(true).PaddingLeft(2), Background)
 }
 
 // SelectionStyle returns the lipgloss style used to highlight selected

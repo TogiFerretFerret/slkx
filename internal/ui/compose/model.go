@@ -141,7 +141,7 @@ func New(channelName string) Model {
 	ta.SetWidth(40)
 
 	// Override textarea styles to use our dark background consistently
-	bg := lipgloss.NewStyle().Background(styles.SurfaceDark).Foreground(styles.TextPrimary)
+	bg := styles.Bg(lipgloss.NewStyle(), styles.SurfaceDark).Foreground(styles.TextPrimary)
 	s := ta.Styles()
 	s.Focused.Base = bg
 	s.Focused.Text = bg
@@ -166,7 +166,7 @@ func New(channelName string) Model {
 // RefreshStyles re-applies textarea styles from current theme colors.
 // Call after theme changes.
 func (m *Model) RefreshStyles() {
-	bg := lipgloss.NewStyle().Background(styles.SurfaceDark).Foreground(styles.TextPrimary)
+	bg := styles.Bg(lipgloss.NewStyle(), styles.SurfaceDark).Foreground(styles.TextPrimary)
 	s := m.input.Styles()
 	s.Focused.Base = bg
 	s.Focused.Text = bg
@@ -1164,11 +1164,10 @@ func (m Model) renderChips(width int) string {
 		fg = styles.TextMuted
 	}
 
-	chipStyle := lipgloss.NewStyle().
-		Background(bg).
+	chipStyle := styles.Bg(lipgloss.NewStyle().
 		Foreground(fg).
 		Padding(0, 1).
-		MarginRight(1)
+		MarginRight(1), bg)
 
 	const maxNameLen = 32
 	var rendered []string
@@ -1212,20 +1211,18 @@ func (m Model) View(width int, focused bool) string {
 	// If empty and unfocused, render placeholder manually with correct background.
 	// When focused, show an empty compose box with cursor (no placeholder).
 	if m.input.Value() == "" && !focused {
-		placeholder := lipgloss.NewStyle().
+		placeholder := styles.Bg(lipgloss.NewStyle().
 			Foreground(styles.TextMuted).
-			Background(innerBG).
-			Width(innerWidth).
+			Width(innerWidth), innerBG).
 			Render(m.input.Placeholder)
 		box = style.Render(placeholder)
 	} else {
 		// Wrap textarea output with full-width tinted background.
 		// The textarea's internal styles use Inline(true) which only covers text,
 		// not the full line width. This wrapper ensures consistent background.
-		content := lipgloss.NewStyle().
-			Background(innerBG).
+		content := styles.Bg(lipgloss.NewStyle().
 			Foreground(styles.TextPrimary).
-			Width(innerWidth).
+			Width(innerWidth), innerBG).
 			Render(m.input.View())
 		box = style.Render(content)
 	}

@@ -80,3 +80,49 @@ func (db *DB) UpdatePresence(userID, presence string) error {
 	}
 	return nil
 }
+
+// FilterCachedUsers takes a list of user IDs and returns a set containing the ones
+// that are already present in the users cache table.
+func (db *DB) FilterCachedUsers(ids []string) (map[string]struct{}, error) {
+	cached := make(map[string]struct{})
+	if len(ids) == 0 {
+		return cached, nil
+	}
+
+	// Chunk the query to avoid SQLite parameter limit (999 by default)
+	const chunkSize = 999
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[i:end]
+
+		// Build query with placeholders
+		query := "SELECT id FROM users WHERE id IN ("
+		args := make([]any, len(chunk))
+		for j, id := range chunk {
+			if j > 0 {
+				query += ","
+			}
+			query += "?"
+			args[j] = id
+		}
+		query += ")"
+
+		rows, err := db.conn.Query(query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("filtering cached users: %w", err)
+		}
+
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err == nil {
+				cached[id] = struct{}{}
+			}
+		}
+		rows.Close() // Close early since we are in a loop
+	}
+
+	return cached, nil
+}

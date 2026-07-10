@@ -170,7 +170,7 @@ func (a *App) renderChannelMessagesPanel(msgWidth, msgBorder, contentHeight int,
 	// Background-colored spacer line above the compose box
 	// (replaces MarginTop which produced unstyled/black margin
 	// cells).
-	composeSpacer := lipgloss.NewStyle().Background(styles.Background).Width(msgWidth - 2).Render("")
+	composeSpacer := styles.Bg(lipgloss.NewStyle(), styles.Background).Width(msgWidth - 2).Render("")
 	composeView = composeSpacer + "\n" + composeView
 	composeHeight := lipgloss.Height(composeView)
 	// Always reserve one row above the compose box for the
@@ -181,9 +181,8 @@ func (a *App) renderChannelMessagesPanel(msgWidth, msgBorder, contentHeight int,
 	// spurious "more below" indicator and a visible scroll jump.
 	typingLine := a.renderTypingLine()
 	if typingLine == "" {
-		typingLine = lipgloss.NewStyle().
-			Background(styles.Background).
-			Width(msgWidth - 2).
+		typingLine = styles.Bg(lipgloss.NewStyle().
+			Width(msgWidth - 2), styles.Background).
 			Render("")
 	}
 	typingHeight := 1
